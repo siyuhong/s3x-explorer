@@ -2,6 +2,17 @@
 
 A powerful VS Code extension for browsing and managing S3-compatible storage, specifically designed to work seamlessly with **Cloudflare R2**, AWS S3, MinIO, and other S3-compatible services.
 
+## 🚀 Quick Highlights
+
+- 📁 **Tree View** - Browse buckets and objects like a local file system
+- ✏️ **Inline Editing** - Open and edit S3 objects directly in VS Code
+- 📋 **Paste Upload** - Copy images and paste with Ctrl/Cmd+V
+- 🔗 **URL Generation** - Presigned URLs and public URLs with custom domains
+- 🎨 **Media Preview** - Built-in viewer for images, videos, and audio
+- ⚡ **Smart Upload** - Template-based file naming with drag & drop support
+- 🔍 **Search** - Fast prefix search and content filtering
+- 🛡️ **Reliable** - Automatic retry, caching, and progress tracking
+
 ## ✨ Features
 
 ### 🗂️ File Explorer Interface
@@ -21,6 +32,7 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 ### 🔄 File Operations
 
 - **Upload**: Drag & drop files or use context menu
+- **Paste Upload**: Copy images to clipboard and paste directly
 - **Download**: Save objects to local filesystem
 - **CRUD Operations**: Create folders, rename, delete, copy, move
 - **Bulk Operations**: Multi-select support with progress tracking
@@ -31,6 +43,8 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 - **Presigned URLs**: Generate temporary shareable links with custom expiry
 - **Public URLs**: Generate permanent public URLs with custom domain support
 - **Custom Upload Names**: Template-based file naming with date/time variables
+- **Paste Upload Templates**: Specialized templates for clipboard image uploads
+- **Keyboard Shortcuts**: Quick actions with Ctrl/Cmd+V for paste upload
 - **Metadata Viewer**: View complete object metadata and headers
 - **Search**: Find objects by prefix or content matching
 - **Progress Tracking**: Real-time progress for all operations
@@ -79,7 +93,10 @@ Open VS Code settings (`Ctrl/Cmd + ,`) and configure:
   "s3x.includeBucketInPublicUrl": true,
 
   // Optional: Template for uploaded file names (default: ${fileName}${extName})
-  "s3x.uploadFileNameTemplate": "${fileName}-${date}${extName}"
+  "s3x.uploadFileNameTemplate": "${fileName}-${date}${extName}",
+
+  // Optional: Template for pasted image file names (default: image-${dateTime}.png)
+  "s3x.pasteImageFileNameTemplate": "screenshot-${dateTime}.png"
 }
 ```
 
@@ -144,6 +161,7 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 
 - **Right-click** bucket/folder → "Upload File" or "Upload Folder"
 - **Drag & drop** files from your file system into the tree
+- **Paste images** - Copy image to clipboard, focus tree, press Ctrl+V
 - **Progress tracking** shows upload status
 
 #### Creating Folders
@@ -181,15 +199,47 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 Configure `s3x.uploadFileNameTemplate` to automatically rename files during upload:
 
 **Available Variables:**
+
 - `${fileName}` - Original file name without extension
 - `${extName}` - File extension with dot (e.g., `.jpg`)
 - `${date}` - Current date in YYYY-MM-DD format
 - `${dateTime}` - Current date and time in YYYY-MM-DD-HH-MM-SS format
 
 **Examples:**
+
 - `${fileName}-${date}${extName}` → `photo-2025-12-14.jpg`
 - `${dateTime}-${fileName}${extName}` → `2025-12-14-10-30-45-photo.jpg`
 - `${date}/${fileName}${extName}` → `2025-12-14/photo.jpg`
+
+#### Paste Upload
+
+**Quick image upload from clipboard** - perfect for screenshots and quick sharing:
+
+1. Copy an image to clipboard (screenshot, copied image, etc.)
+2. Focus on S3/R2 Explorer tree view
+3. Press **Ctrl+V** (Windows/Linux) or **Cmd+V** (macOS)
+4. Select destination bucket or folder
+5. Image automatically uploaded with configured naming template
+
+**Configure paste image naming** with `s3x.pasteImageFileNameTemplate`:
+
+**Available Variables:**
+
+- `${date}` - Current date in YYYY-MM-DD format
+- `${dateTime}` - Current date and time in YYYY-MM-DD-HH-MM-SS format
+- `${timestamp}` - Unix timestamp (e.g., `1702567890`)
+
+**Examples:**
+
+- `image-${dateTime}.png` → `image-2025-12-14-15-30-45.png` (default)
+- `screenshot-${date}.png` → `screenshot-2025-12-14.png`
+- `${timestamp}.png` → `1702567890.png`
+- `screenshots/${dateTime}.png` → `screenshots/2025-12-14-15-30-45.png`
+
+**Keyboard Shortcuts:**
+
+- **Ctrl+V** / **Cmd+V** - Paste upload when tree view is focused
+- **Ctrl+Shift+V** / **Cmd+Shift+V** - Alternative paste upload shortcut
 
 #### Object Metadata
 
@@ -203,34 +253,46 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 
 ## ⚙️ Configuration Reference
 
-| Setting                        | Description                      | Default                  | R2 Required |
-| ------------------------------ | -------------------------------- | ------------------------ | ----------- |
-| `s3x.endpointUrl`              | S3-compatible endpoint URL       | `""`                     | ✅          |
-| `s3x.accessKeyId`              | Access Key ID                    | `""`                     | ✅          |
-| `s3x.secretAccessKey`          | Secret Access Key                | `""`                     | ✅          |
-| `s3x.forcePathStyle`           | Use path-style URLs              | `true`                   | ✅          |
-| `s3x.region`                   | AWS region for SigV4             | `"us-east-1"`            | ⚠️          |
-| `s3x.maxPreviewSizeBytes`      | Max file size for editing        | `10485760`               | ❌          |
-| `s3x.customDomain`             | Custom domain for public URLs    | `""`                     | ❌          |
-| `s3x.includeBucketInPublicUrl` | Include bucket in public URLs    | `true`                   | ❌          |
-| `s3x.uploadFileNameTemplate`   | Template for uploaded file names | `"${fileName}${extName}"` | ❌          |
+| Setting                          | Description                      | Default                   | R2 Required |
+| -------------------------------- | -------------------------------- | ------------------------- | ----------- |
+| `s3x.endpointUrl`                | S3-compatible endpoint URL       | `""`                      | ✅          |
+| `s3x.accessKeyId`                | Access Key ID                    | `""`                      | ✅          |
+| `s3x.secretAccessKey`            | Secret Access Key                | `""`                      | ✅          |
+| `s3x.forcePathStyle`             | Use path-style URLs              | `true`                    | ✅          |
+| `s3x.region`                     | AWS region for SigV4             | `"us-east-1"`             | ⚠️          |
+| `s3x.maxPreviewSizeBytes`        | Max file size for editing        | `10485760` (10MB)         | ❌          |
+| `s3x.customDomain`               | Custom domain for public URLs    | `""`                      | ❌          |
+| `s3x.includeBucketInPublicUrl`   | Include bucket in public URLs    | `true`                    | ❌          |
+| `s3x.uploadFileNameTemplate`     | Template for uploaded file names | `"${fileName}${extName}"` | ❌          |
+| `s3x.pasteImageFileNameTemplate` | Template for pasted image names  | `"image-${dateTime}.png"` | ❌          |
 
 ⚠️ **Note**: R2 works with any region, but `us-east-1` is recommended.
 
 ## 🔧 Commands
 
-| Command                        | Description                          | Shortcut |
-| ------------------------------ | ------------------------------------ | -------- |
-| `S3: Configure S3/R2 Settings` | Open configuration wizard            |          |
-| `S3: Search in Bucket`         | Search objects by prefix/content     |          |
-| `S3: Refresh`                  | Refresh tree view                    |          |
-| `S3: Run Smoke Test`           | Test connection and basic operations |          |
+| Command                        | Description                          | Shortcut   |
+| ------------------------------ | ------------------------------------ | ---------- |
+| `S3: Configure S3/R2 Settings` | Open configuration wizard            |            |
+| `S3: S3/R2 Setup Wizard`       | Step-by-step setup wizard            |            |
+| `S3: Search in Bucket`         | Search objects by prefix/content     |            |
+| `S3: Refresh`                  | Refresh tree view                    |            |
+| `S3: Force Refresh All`        | Clear cache and refresh all          |            |
+| `S3: Run Smoke Test`           | Test connection and basic operations |            |
+| `S3: Paste Upload`             | Upload image from clipboard          | Ctrl/Cmd+V |
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut                           | Action                            | Context                     |
+| ---------------------------------- | --------------------------------- | --------------------------- |
+| **Ctrl+V** / **Cmd+V**             | Paste upload image from clipboard | S3/R2 Explorer tree focused |
+| **Ctrl+Shift+V** / **Cmd+Shift+V** | Paste upload (alternative)        | S3/R2 Explorer tree focused |
 
 ### Context Menu Commands
 
 - **New Folder** - Create a new folder/prefix
 - **Upload File** - Upload single or multiple files (with template-based naming)
 - **Upload Folder** - Upload entire directory (recursive)
+- **Paste Upload** - Upload image from clipboard (Ctrl/Cmd+V)
 - **Download** - Download object to local file
 - **Rename** - Rename object or folder
 - **Copy** - Copy object to another location

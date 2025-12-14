@@ -204,7 +204,7 @@
       },
       {
         "command": "s3x.pasteUpload",
-        "title": "Paste Upload",
+        "title": "S3: Paste Upload",
         "icon": "$(clippy)"
       }
     ],
