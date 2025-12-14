@@ -11,9 +11,10 @@ import {
   copyObject,
   moveObject,
   generatePresignedUrl,
+  generatePublicUrl,
   getObjectMetadata,
 } from "./s3/ops";
-import { testConnection, clearClientCache } from "./s3/client";
+import { testConnection, clearClientCache, getConfig } from "./s3/client";
 import { s3Cache } from "./util/cache";
 import {
   LoadMoreNode,
@@ -193,6 +194,12 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.presign", async (node) => {
       await handleGeneratePresignedUrl(node);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.publicUrl", async (node) => {
+      await handleGeneratePublicUrl(node);
     })
   );
 
@@ -513,30 +520,64 @@ async function handleRename(node: any) {
 async function handleGeneratePresignedUrl(node: any) {
   try {
     if (!isObjectNode(node)) {
-      showErrorMessage("Can only generate presigned URLs for objects");
+      showErrorMessage("Can only generate URLs for objects");
       return;
     }
 
     const expiresIn = await promptForPresignedUrlExpiry();
-    if (!expiresIn) {
+    if (expiresIn === undefined) {
       return;
     }
 
-    const url = await generatePresignedUrl(node.bucket, node.key, {
-      expiresIn,
-    });
+    let url: string;
+    let message: string;
+
+    if (expiresIn === 0) {
+      // Generate public URL (permanent link)
+      url = generatePublicUrl(node.bucket, node.key);
+      message = "Public URL copied to clipboard (permanent)";
+    } else {
+      // Generate presigned URL
+      url = await generatePresignedUrl(node.bucket, node.key, { expiresIn });
+      const minutes = Math.round(expiresIn / 60);
+      const hours = Math.round(expiresIn / 3600);
+      const days = Math.round(expiresIn / 86400);
+
+      let timeStr: string;
+      if (days >= 1) {
+        timeStr = `${days} day${days > 1 ? "s" : ""}`;
+      } else if (hours >= 1) {
+        timeStr = `${hours} hour${hours > 1 ? "s" : ""}`;
+      } else {
+        timeStr = `${minutes} minute${minutes > 1 ? "s" : ""}`;
+      }
+
+      message = `Presigned URL copied to clipboard (expires in ${timeStr})`;
+    }
 
     await vscode.env.clipboard.writeText(url);
-    showInformationMessage(
-      `Presigned URL copied to clipboard (expires in ${Math.round(
-        expiresIn / 60
-      )} minutes)`
-    );
+    showInformationMessage(message);
   } catch (error) {
     showErrorMessage(
-      `Failed to generate presigned URL: ${
-        error instanceof Error ? error.message : error
-      }`
+      `Failed to generate URL: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handleGeneratePublicUrl(node: any) {
+  try {
+    if (!isObjectNode(node)) {
+      showErrorMessage("Can only generate URLs for objects");
+      return;
+    }
+
+    const config = getConfig();
+    const url = generatePublicUrl(node.bucket, node.key, config.includeBucketInPublicUrl);
+    await vscode.env.clipboard.writeText(url);
+    showInformationMessage("Public URL copied to clipboard (permanent)");
+  } catch (error) {
+    showErrorMessage(
+      `Failed to generate public URL: ${error instanceof Error ? error.message : error}`
     );
   }
 }

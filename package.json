@@ -63,6 +63,16 @@
           "type": "number",
           "default": 10485760,
           "description": "Max object size (bytes) to open directly in editor."
+        },
+        "s3x.customDomain": {
+          "type": "string",
+          "default": "",
+          "description": "Custom domain for public URLs (e.g., https://cdn.example.com). Leave empty to use endpoint URL."
+        },
+        "s3x.includeBucketInPublicUrl": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include bucket name in public URLs."
         }
       }
     },
@@ -136,6 +146,11 @@
         "command": "s3x.presign",
         "title": "Generate Presigned URL",
         "icon": "$(link)"
+      },
+      {
+        "command": "s3x.publicUrl",
+        "title": "Generate Public URL",
+        "icon": "$(globe)"
       },
       {
         "command": "s3x.search",
@@ -250,7 +265,12 @@
         {
           "command": "s3x.presign",
           "when": "view == s3xExplorer && viewItem == object",
-          "group": "5_url"
+          "group": "5_url@1"
+        },
+        {
+          "command": "s3x.publicUrl",
+          "when": "view == s3xExplorer && viewItem == object",
+          "group": "5_url@2"
         },
         {
           "command": "s3x.previewMedia",

@@ -7,6 +7,8 @@ export interface S3Config {
   secretAccessKey: string;
   forcePathStyle: boolean;
   maxPreviewSizeBytes: number;
+  customDomain?: string;
+  includeBucketInPublicUrl: boolean;
 }
 
 export interface S3Object {

@@ -278,6 +278,38 @@ export async function generatePresignedUrl(
   }
 }
 
+export function generatePublicUrl(bucket: string, key: string, includeBucket: boolean = true): string {
+  const config = getConfig();
+  const endpoint = config.customDomain || config.endpointUrl;
+
+  // Remove trailing slash
+  const baseUrl = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
+
+  // URL encode the key
+  const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+
+  // If not including bucket, just return domain + key
+  if (!includeBucket) {
+    return `${baseUrl}/${encodedKey}`;
+  }
+
+  // If using custom domain, always use path-style with bucket
+  if (config.customDomain) {
+    return `${baseUrl}/${bucket}/${encodedKey}`;
+  }
+
+  // Generate URL based on forcePathStyle setting
+  if (config.forcePathStyle) {
+    // Path-style: https://endpoint/bucket/key
+    return `${baseUrl}/${bucket}/${encodedKey}`;
+  } else {
+    // Virtual-hosted-style: https://bucket.endpoint/key
+    const url = new URL(baseUrl);
+    url.hostname = `${bucket}.${url.hostname}`;
+    return `${url.origin}/${encodedKey}`;
+  }
+}
+
 export async function uploadFile(
   bucket: string,
   key: string,

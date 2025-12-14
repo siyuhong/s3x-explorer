@@ -15,6 +15,8 @@ export function getConfig(): S3Config {
     secretAccessKey: config.get<string>("secretAccessKey", ""),
     forcePathStyle: config.get<boolean>("forcePathStyle", true),
     maxPreviewSizeBytes: config.get<number>("maxPreviewSizeBytes", 10485760),
+    customDomain: config.get<string>("customDomain", ""),
+    includeBucketInPublicUrl: config.get<boolean>("includeBucketInPublicUrl", true),
   };
 }
 
@@ -141,10 +143,23 @@ export async function testConnection(): Promise<void> {
       );
     }
 
+    const statusCode = error.$metadata?.httpStatusCode || error.statusCode;
+    const errorMsg = error.message || error.code || error.name || 'Unknown error';
+    const statusMsg = statusCode ? ` (HTTP ${statusCode})` : '';
+
+    if (statusCode === 404) {
+      throw new S3Error(
+        `Endpoint not found (HTTP 404). Please verify your endpoint URL is correct. Current: ${getConfig().endpointUrl}`,
+        error.code,
+        statusCode,
+        false
+      );
+    }
+
     throw new S3Error(
-      `Connection test failed: ${error.message}`,
+      `Connection test failed: ${errorMsg}${statusMsg}`,
       error.code,
-      error.$metadata?.httpStatusCode,
+      statusCode,
       S3Error.isRetryable(error)
     );
   }

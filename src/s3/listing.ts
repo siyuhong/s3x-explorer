@@ -28,10 +28,23 @@ export async function listBuckets(): Promise<S3Bucket[]> {
         creationDate: bucket.CreationDate,
       }));
     } catch (error: any) {
+      const statusCode = error.$metadata?.httpStatusCode || error.statusCode;
+      const errorMsg = error.message || error.code || error.name || 'Unknown error';
+      const statusMsg = statusCode ? ` (HTTP ${statusCode})` : '';
+
+      if (statusCode === 404) {
+        throw new S3Error(
+          `Endpoint not found (HTTP 404). Please check your s3x.endpointUrl setting.`,
+          error.code,
+          statusCode,
+          false
+        );
+      }
+
       throw new S3Error(
-        `Failed to list buckets: ${error.message}`,
+        `Failed to list buckets: ${errorMsg}${statusMsg}`,
         error.code,
-        error.$metadata?.httpStatusCode,
+        statusCode,
         S3Error.isRetryable(error)
       );
     }
