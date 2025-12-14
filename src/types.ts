@@ -9,6 +9,7 @@ export interface S3Config {
   maxPreviewSizeBytes: number;
   customDomain?: string;
   includeBucketInPublicUrl: boolean;
+  uploadFileNameTemplate: string;
 }
 
 export interface S3Object {

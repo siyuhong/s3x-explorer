@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import { S3Explorer } from "./tree/explorer";
 import { S3FileSystemProvider } from "./fs/provider";
 import { listBuckets, searchObjects } from "./s3/listing";
@@ -51,6 +52,7 @@ import {
   isImageFile,
   isVideoFile,
   isAudioFile,
+  applyFileNameTemplate,
 } from "./util/paths";
 
 let s3Explorer: S3Explorer;
@@ -347,7 +349,9 @@ async function handleUploadFile(node: any) {
     }
 
     for (const file of files) {
-      const fileName = getFileName(file.fsPath);
+      const originalFileName = path.basename(file.fsPath);
+      const config = getConfig();
+      const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
       const objectKey = joinPath(prefix, fileName);
 
       await withUploadProgress(async (progress) => {

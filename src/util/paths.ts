@@ -370,3 +370,22 @@ export function sanitizeS3Key(key: string): string {
 
   return sanitized;
 }
+
+/**
+ * Apply file name template with variable substitution
+ */
+export function applyFileNameTemplate(originalFileName: string, template: string): string {
+  const lastDotIndex = originalFileName.lastIndexOf(".");
+  const fileName = lastDotIndex > 0 ? originalFileName.substring(0, lastDotIndex) : originalFileName;
+  const extName = lastDotIndex > 0 ? originalFileName.substring(lastDotIndex) : "";
+
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const dateTime = `${date}-${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
+
+  return template
+    .replace(/\$\{fileName\}/g, fileName)
+    .replace(/\$\{extName\}/g, extName)
+    .replace(/\$\{date\}/g, date)
+    .replace(/\$\{dateTime\}/g, dateTime);
+}

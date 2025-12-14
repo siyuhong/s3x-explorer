@@ -73,6 +73,11 @@
           "type": "boolean",
           "default": true,
           "description": "Include bucket name in public URLs."
+        },
+        "s3x.uploadFileNameTemplate": {
+          "type": "string",
+          "default": "${fileName}${extName}",
+          "description": "Template for uploaded file names.\n\nVariables: \n - ${fileName} (name without extension)\n - ${extName} (extension with dot)\n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS).\nExamples:\n${fileName}-${date}${extName} → photo-2025-12-14.jpg"
         }
       }
     },

@@ -17,6 +17,7 @@ export function getConfig(): S3Config {
     maxPreviewSizeBytes: config.get<number>("maxPreviewSizeBytes", 10485760),
     customDomain: config.get<string>("customDomain", ""),
     includeBucketInPublicUrl: config.get<boolean>("includeBucketInPublicUrl", true),
+    uploadFileNameTemplate: config.get<string>("uploadFileNameTemplate", "${fileName}${extName}"),
   };
 }
 
