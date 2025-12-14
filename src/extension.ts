@@ -57,6 +57,7 @@ import {
 
 let s3Explorer: S3Explorer;
 let s3FileSystemProvider: S3FileSystemProvider;
+let s3TreeView: vscode.TreeView<any>;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("S3/R2 Explorer is activating...");
@@ -73,12 +74,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(fsProviderDisposable);
 
   // Register TreeDataProvider
-  const treeViewDisposable = vscode.window.createTreeView("s3xExplorer", {
+  s3TreeView = vscode.window.createTreeView("s3xExplorer", {
     treeDataProvider: s3Explorer,
     dragAndDropController: s3Explorer,
     canSelectMany: true,
   });
-  context.subscriptions.push(treeViewDisposable);
+  context.subscriptions.push(s3TreeView);
 
   // Register commands
   registerCommands(context);
@@ -153,6 +154,12 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.uploadFile", async (node) => {
       await handleUploadFile(node);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.pasteUpload", async (node) => {
+      await handlePasteUpload(node);
     })
   );
 
@@ -377,6 +384,156 @@ async function handleUploadFile(node: any) {
       `Failed to upload files: ${
         error instanceof Error ? error.message : error
       }`
+    );
+  }
+}
+
+async function handlePasteUpload(node: any) {
+  try {
+    // If no node provided, get from tree view selection
+    if (!node && s3TreeView.selection.length > 0) {
+      node = s3TreeView.selection[0];
+    }
+
+    let bucket: string;
+    let prefix = "";
+
+    if (isBucketNode(node)) {
+      bucket = node.bucket;
+    } else if (isPrefixNode(node)) {
+      bucket = node.bucket;
+      prefix = node.prefix;
+    } else {
+      const selectedBucket = await promptForBucket();
+      if (!selectedBucket) {
+        return;
+      }
+      bucket = selectedBucket;
+    }
+
+    const fs = await import("fs");
+    const os = await import("os");
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    // Try to get image from clipboard
+    const tempImagePath = path.join(os.tmpdir(), `s3x-paste-${Date.now()}.png`);
+    let hasImage = false;
+
+    try {
+      if (process.platform === "darwin") {
+        // macOS: use osascript to get clipboard image
+        await execAsync(`osascript -e 'set theImage to the clipboard as «class PNGf»' -e 'set theFile to open for access POSIX file "${tempImagePath}" with write permission' -e 'write theImage to theFile' -e 'close access theFile'`);
+        hasImage = fs.existsSync(tempImagePath) && (await fs.promises.stat(tempImagePath)).size > 0;
+      } else if (process.platform === "win32") {
+        // Windows: use PowerShell to get clipboard image
+        await execAsync(`powershell -command "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $img.Save('${tempImagePath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png) }"`);
+        hasImage = fs.existsSync(tempImagePath) && (await fs.promises.stat(tempImagePath)).size > 0;
+      }
+    } catch (err) {
+      // Ignore errors, fall back to text handling
+    }
+
+    if (hasImage) {
+      try {
+        const config = getConfig();
+        const template = config.pasteImageFileNameTemplate || "image-${dateTime}.png";
+
+        const now = new Date();
+        const date = now.toISOString().split('T')[0];
+        const dateTime = now.toISOString().replace(/[:.]/g, '-').split('.')[0].replace('T', '-');
+        const timestamp = Date.now().toString();
+
+        const fileName = template
+          .replace(/\$\{date\}/g, date)
+          .replace(/\$\{dateTime\}/g, dateTime)
+          .replace(/\$\{timestamp\}/g, timestamp);
+
+        const objectKey = joinPath(prefix, fileName);
+
+        await withUploadProgress(async (progress) => {
+          progress.report({ message: `Uploading ${fileName}...` });
+          await uploadFile(bucket, objectKey, tempImagePath, (progressPercent) => {
+            progress.setProgress(progressPercent, `Uploading ${fileName}... ${progressPercent}%`);
+          });
+        }, fileName);
+
+        s3Cache.invalidate(bucket, prefix);
+        s3Explorer.refresh(node);
+        showInformationMessage(`Uploaded "${fileName}" from clipboard successfully`);
+      } finally {
+        await fs.promises.unlink(tempImagePath).catch(() => {});
+      }
+      return;
+    }
+
+    // No image, try text
+    const clipboardText = await vscode.env.clipboard.readText();
+    if (!clipboardText) {
+      showErrorMessage("Clipboard is empty");
+      return;
+    }
+
+    // Check if clipboard contains a file path
+    if (fs.existsSync(clipboardText.trim())) {
+      const filePath = clipboardText.trim();
+      const stat = await fs.promises.stat(filePath);
+
+      if (stat.isFile()) {
+        const originalFileName = path.basename(filePath);
+        const config = getConfig();
+        const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
+        const objectKey = joinPath(prefix, fileName);
+
+        await withUploadProgress(async (progress) => {
+          progress.report({ message: `Uploading ${fileName}...` });
+          await uploadFile(bucket, objectKey, filePath, (progressPercent) => {
+            progress.setProgress(progressPercent, `Uploading ${fileName}... ${progressPercent}%`);
+          });
+        }, fileName);
+
+        s3Cache.invalidate(bucket, prefix);
+        s3Explorer.refresh(node);
+        showInformationMessage(`Uploaded "${fileName}" from clipboard successfully`);
+        return;
+      }
+    }
+
+    // Clipboard contains text content - create temporary file
+    const fileName = await vscode.window.showInputBox({
+      prompt: "Enter filename for clipboard content",
+      value: `clipboard-${Date.now()}.txt`,
+    });
+
+    if (!fileName) {
+      return;
+    }
+
+    const tempFilePath = path.join(os.tmpdir(), `s3x-paste-${Date.now()}.tmp`);
+    await fs.promises.writeFile(tempFilePath, clipboardText, "utf-8");
+
+    try {
+      const config = getConfig();
+      const finalFileName = applyFileNameTemplate(fileName, config.uploadFileNameTemplate);
+      const objectKey = joinPath(prefix, finalFileName);
+
+      await withUploadProgress(async (progress) => {
+        progress.report({ message: `Uploading ${finalFileName}...` });
+        await uploadFile(bucket, objectKey, tempFilePath, (progressPercent) => {
+          progress.setProgress(progressPercent, `Uploading ${finalFileName}... ${progressPercent}%`);
+        });
+      }, finalFileName);
+
+      s3Cache.invalidate(bucket, prefix);
+      s3Explorer.refresh(node);
+      showInformationMessage(`Uploaded "${finalFileName}" from clipboard successfully`);
+    } finally {
+      await fs.promises.unlink(tempFilePath).catch(() => {});
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to paste upload: ${error instanceof Error ? error.message : error}`
     );
   }
 }

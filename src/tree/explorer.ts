@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import { listBuckets, listObjects } from "../s3/listing";
 import { S3Error } from "../types";
 import { s3Cache } from "../util/cache";
+import { uploadFile } from "../s3/ops";
+import { joinPath, applyFileNameTemplate } from "../util/paths";
+import { getConfig } from "../s3/client";
 import {
   BaseTreeNode,
   BucketNode,
@@ -31,7 +35,7 @@ export class S3Explorer
   > = this._onDidChangeTreeData.event;
 
   // Drag and drop support
-  dropMimeTypes = ["application/vnd.code.tree.s3xExplorer"];
+  dropMimeTypes = ["application/vnd.code.tree.s3xExplorer", "files", "text/uri-list"];
   dragMimeTypes = ["text/uri-list", "application/vnd.code.tree.s3xExplorer"];
 
   constructor() {}
@@ -325,12 +329,10 @@ export class S3Explorer
     sources: vscode.DataTransfer,
     token: vscode.CancellationToken
   ): Promise<void> {
-    // Handle external file drops (e.g., from file explorer)
-    const fileDropData = sources.get(
-      "application/vnd.code.tree.dataTransferKey"
-    );
-    if (fileDropData) {
-      await this.handleExternalFileDrop(target, fileDropData);
+    // Handle external file drops from file system
+    const filesData = sources.get("files");
+    if (filesData) {
+      await this.handleFilesDataDrop(target, filesData.value);
       return;
     }
 
@@ -351,14 +353,12 @@ export class S3Explorer
     }
   }
 
-  private async handleExternalFileDrop(
+  private async handleFilesDataDrop(
     target: BaseTreeNode | undefined,
-    fileData: any
+    files: vscode.DataTransferFile[]
   ): Promise<void> {
     if (!target || (!isBucketNode(target) && !isPrefixNode(target))) {
-      vscode.window.showErrorMessage(
-        "Can only upload files to buckets or folders"
-      );
+      vscode.window.showErrorMessage("Can only upload to buckets or folders");
       return;
     }
 
@@ -366,14 +366,35 @@ export class S3Explorer
     const targetPrefix = isPrefixNode(target) ? target.prefix : "";
 
     try {
-      // TODO: Implement file upload logic
-      // This would involve reading the dropped files and uploading them to S3
-      vscode.window.showInformationMessage(
-        "File upload functionality will be implemented in the upload commands"
-      );
+      let uploadCount = 0;
+      for (const file of files) {
+        try {
+          const uri = file.uri;
+          if (uri.scheme === "file") {
+            const filePath = uri.fsPath;
+            const originalFileName = path.basename(filePath);
+            const config = getConfig();
+            const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
+            const objectKey = joinPath(targetPrefix, fileName);
+
+            await uploadFile(targetBucket, objectKey, filePath);
+            uploadCount++;
+          }
+        } catch (err) {
+          console.error(`Failed to upload ${file.name}:`, err);
+        }
+      }
+
+      if (uploadCount > 0) {
+        s3Cache.invalidate(targetBucket, targetPrefix);
+        this.refresh(target);
+        vscode.window.showInformationMessage(
+          `Uploaded ${uploadCount} file${uploadCount > 1 ? "s" : ""} successfully`
+        );
+      }
     } catch (error) {
       vscode.window.showErrorMessage(
-        `Upload failed: ${error instanceof Error ? error.message : error}`
+        `Drop failed: ${error instanceof Error ? error.message : error}`
       );
     }
   }
@@ -413,18 +434,44 @@ export class S3Explorer
     target: BaseTreeNode | undefined,
     uriList: string
   ): Promise<void> {
-    const uris = uriList.split("\n").filter((uri) => uri.trim());
-
     if (!target || (!isBucketNode(target) && !isPrefixNode(target))) {
       vscode.window.showErrorMessage("Can only upload to buckets or folders");
       return;
     }
 
+    const uris = uriList.split("\n").filter((uri) => uri.trim());
+    if (uris.length === 0) return;
+
+    const targetBucket = target.bucket;
+    const targetPrefix = isPrefixNode(target) ? target.prefix : "";
+
     try {
-      // TODO: Handle URI drops (could be local files or other S3 objects)
-      vscode.window.showInformationMessage(
-        "URI drop functionality will be implemented"
-      );
+      let uploadCount = 0;
+      for (const uriStr of uris) {
+        try {
+          const uri = vscode.Uri.parse(uriStr);
+          if (uri.scheme === "file") {
+            const filePath = uri.fsPath;
+            const originalFileName = path.basename(filePath);
+            const config = getConfig();
+            const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
+            const objectKey = joinPath(targetPrefix, fileName);
+
+            await uploadFile(targetBucket, objectKey, filePath);
+            uploadCount++;
+          }
+        } catch (err) {
+          console.error(`Failed to upload ${uriStr}:`, err);
+        }
+      }
+
+      if (uploadCount > 0) {
+        s3Cache.invalidate(targetBucket, targetPrefix);
+        this.refresh(target);
+        vscode.window.showInformationMessage(
+          `Uploaded ${uploadCount} file${uploadCount > 1 ? "s" : ""} successfully`
+        );
+      }
     } catch (error) {
       vscode.window.showErrorMessage(
         `Drop failed: ${error instanceof Error ? error.message : error}`

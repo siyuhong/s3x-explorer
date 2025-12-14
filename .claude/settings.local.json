@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm run compile:*)",
       "Bash(npm run lint)",
-      "Bash(npm run test:unit:*)"
+      "Bash(npm run test:unit:*)",
+      "mcp__filesystem-with-morph__edit_file"
     ],
     "deny": [],
     "ask": []

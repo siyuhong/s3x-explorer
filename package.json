@@ -78,6 +78,11 @@
           "type": "string",
           "default": "${fileName}${extName}",
           "description": "Template for uploaded file names.\n\nVariables: \n - ${fileName} (name without extension)\n - ${extName} (extension with dot)\n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS).\nExamples:\n${fileName}-${date}${extName} → photo-2025-12-14.jpg"
+        },
+        "s3x.pasteImageFileNameTemplate": {
+          "type": "string",
+          "default": "image-${dateTime}.png",
+          "description": "Template for pasted image file names.\n\nVariables: \n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS)\n - ${timestamp} (Unix timestamp).\nExamples:\nscreenshot-${dateTime}.png → screenshot-2025-12-14-15-30-45.png"
         }
       }
     },
@@ -196,6 +201,11 @@
         "command": "s3x.openFile",
         "title": "Open File",
         "icon": "$(file)"
+      },
+      {
+        "command": "s3x.pasteUpload",
+        "title": "Paste Upload",
+        "icon": "$(clippy)"
       }
     ],
     "menus": {
@@ -241,6 +251,11 @@
           "command": "s3x.uploadFolder",
           "when": "view == s3xExplorer && (viewItem == bucket || viewItem == prefix)",
           "group": "2_new@3"
+        },
+        {
+          "command": "s3x.pasteUpload",
+          "when": "view == s3xExplorer && (viewItem == bucket || viewItem == prefix)",
+          "group": "2_new@4"
         },
         {
           "command": "s3x.download",
@@ -313,7 +328,21 @@
           "when": "config.s3x.endpointUrl != ''"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "s3x.pasteUpload",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "focusedView == s3xExplorer"
+      },
+      {
+        "command": "s3x.pasteUpload",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "focusedView == s3xExplorer"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run esbuild-base -- --minify",

@@ -10,6 +10,7 @@ export interface S3Config {
   customDomain?: string;
   includeBucketInPublicUrl: boolean;
   uploadFileNameTemplate: string;
+  pasteImageFileNameTemplate: string;
 }
 
 export interface S3Object {
