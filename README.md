@@ -29,6 +29,8 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 ### 🔗 Advanced Features
 
 - **Presigned URLs**: Generate temporary shareable links with custom expiry
+- **Public URLs**: Generate permanent public URLs with custom domain support
+- **Custom Upload Names**: Template-based file naming with date/time variables
 - **Metadata Viewer**: View complete object metadata and headers
 - **Search**: Find objects by prefix or content matching
 - **Progress Tracking**: Real-time progress for all operations
@@ -68,7 +70,16 @@ Open VS Code settings (`Ctrl/Cmd + ,`) and configure:
   "s3x.region": "us-east-1",
 
   // Optional: Max file size for direct editing (default: 10MB)
-  "s3x.maxPreviewSizeBytes": 10485760
+  "s3x.maxPreviewSizeBytes": 10485760,
+
+  // Optional: Custom domain for public URLs (e.g., CDN)
+  "s3x.customDomain": "https://cdn.example.com",
+
+  // Optional: Include bucket name in public URLs (default: true)
+  "s3x.includeBucketInPublicUrl": true,
+
+  // Optional: Template for uploaded file names (default: ${fileName}${extName})
+  "s3x.uploadFileNameTemplate": "${fileName}-${date}${extName}"
 }
 ```
 
@@ -158,6 +169,28 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 2. Choose expiry time (15 minutes to 7 days)
 3. URL automatically copied to clipboard
 
+#### Public URLs
+
+1. Right-click object → "Generate Public URL"
+2. URL automatically copied to clipboard (permanent, no expiry)
+3. Uses custom domain if configured in `s3x.customDomain`
+4. Bucket name inclusion controlled by `s3x.includeBucketInPublicUrl`
+
+#### Custom Upload File Names
+
+Configure `s3x.uploadFileNameTemplate` to automatically rename files during upload:
+
+**Available Variables:**
+- `${fileName}` - Original file name without extension
+- `${extName}` - File extension with dot (e.g., `.jpg`)
+- `${date}` - Current date in YYYY-MM-DD format
+- `${dateTime}` - Current date and time in YYYY-MM-DD-HH-MM-SS format
+
+**Examples:**
+- `${fileName}-${date}${extName}` → `photo-2025-12-14.jpg`
+- `${dateTime}-${fileName}${extName}` → `2025-12-14-10-30-45-photo.jpg`
+- `${date}/${fileName}${extName}` → `2025-12-14/photo.jpg`
+
 #### Object Metadata
 
 - Right-click object → "Show Object Metadata"
@@ -170,14 +203,17 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 
 ## ⚙️ Configuration Reference
 
-| Setting                   | Description                | Default       | R2 Required |
-| ------------------------- | -------------------------- | ------------- | ----------- |
-| `s3x.endpointUrl`         | S3-compatible endpoint URL | `""`          | ✅          |
-| `s3x.accessKeyId`         | Access Key ID              | `""`          | ✅          |
-| `s3x.secretAccessKey`     | Secret Access Key          | `""`          | ✅          |
-| `s3x.forcePathStyle`      | Use path-style URLs        | `true`        | ✅          |
-| `s3x.region`              | AWS region for SigV4       | `"us-east-1"` | ⚠️          |
-| `s3x.maxPreviewSizeBytes` | Max file size for editing  | `10485760`    | ❌          |
+| Setting                        | Description                      | Default                  | R2 Required |
+| ------------------------------ | -------------------------------- | ------------------------ | ----------- |
+| `s3x.endpointUrl`              | S3-compatible endpoint URL       | `""`                     | ✅          |
+| `s3x.accessKeyId`              | Access Key ID                    | `""`                     | ✅          |
+| `s3x.secretAccessKey`          | Secret Access Key                | `""`                     | ✅          |
+| `s3x.forcePathStyle`           | Use path-style URLs              | `true`                   | ✅          |
+| `s3x.region`                   | AWS region for SigV4             | `"us-east-1"`            | ⚠️          |
+| `s3x.maxPreviewSizeBytes`      | Max file size for editing        | `10485760`               | ❌          |
+| `s3x.customDomain`             | Custom domain for public URLs    | `""`                     | ❌          |
+| `s3x.includeBucketInPublicUrl` | Include bucket in public URLs    | `true`                   | ❌          |
+| `s3x.uploadFileNameTemplate`   | Template for uploaded file names | `"${fileName}${extName}"` | ❌          |
 
 ⚠️ **Note**: R2 works with any region, but `us-east-1` is recommended.
 
@@ -193,14 +229,15 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 ### Context Menu Commands
 
 - **New Folder** - Create a new folder/prefix
-- **Upload File** - Upload single or multiple files
+- **Upload File** - Upload single or multiple files (with template-based naming)
 - **Upload Folder** - Upload entire directory (recursive)
 - **Download** - Download object to local file
 - **Rename** - Rename object or folder
 - **Copy** - Copy object to another location
 - **Move** - Move object to another location
 - **Delete** - Delete object or folder
-- **Generate Presigned URL** - Create shareable link
+- **Generate Presigned URL** - Create temporary shareable link with expiry
+- **Generate Public URL** - Create permanent public URL (with custom domain support)
 - **Show Object Metadata** - View detailed metadata
 
 ## 🔒 Security Notes
