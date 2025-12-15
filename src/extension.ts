@@ -674,8 +674,56 @@ async function handleMove(node: any) {
 }
 
 async function handleRename(node: any) {
-  showInformationMessage("Rename functionality will be implemented");
-  // TODO: Implement rename (copy to new key + delete old key)
+  try {
+    if (!isObjectNode(node)) {
+      showErrorMessage("Can only rename files");
+      return;
+    }
+
+    const oldFileName = getFileName(node.key);
+    const newFileName = await vscode.window.showInputBox({
+      title: "Rename File",
+      placeHolder: "Enter new file name",
+      value: oldFileName,
+      validateInput: (value) => {
+        if (!value || value.trim().length === 0) {
+          return "File name cannot be empty";
+        }
+        if (value.includes("/")) {
+          return "File name cannot contain slashes";
+        }
+        if (value === oldFileName) {
+          return "New name must be different from current name";
+        }
+        return undefined;
+      },
+    });
+
+    if (!newFileName) {
+      return;
+    }
+
+    // Calculate new key by replacing the filename part
+    const keyParts = node.key.split("/");
+    keyParts[keyParts.length - 1] = newFileName;
+    const newKey = keyParts.join("/");
+
+    await withMoveProgress(async (progress) => {
+      progress.report({ message: `Renaming ${oldFileName}...` });
+      await moveObject(node.bucket, node.key, node.bucket, newKey);
+    }, 1);
+
+    // Invalidate cache and refresh
+    const prefix = keyParts.slice(0, -1).join("/");
+    s3Cache.invalidate(node.bucket, prefix);
+    s3Explorer.refresh();
+
+    showInformationMessage(`Renamed "${oldFileName}" to "${newFileName}" successfully`);
+  } catch (error) {
+    showErrorMessage(
+      `Failed to rename: ${error instanceof Error ? error.message : error}`
+    );
+  }
 }
 
 async function handleGeneratePresignedUrl(node: any) {
