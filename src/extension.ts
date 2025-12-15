@@ -564,23 +564,97 @@ async function handleUploadFolder(node: any) {
       return;
     }
 
-    const folder = folders[0];
-    showInformationMessage(
-      "Folder upload functionality will be implemented with recursive file walking"
+    const folderPath = folders[0].fsPath;
+    const folderName = path.basename(folderPath);
+    const fs = await import("fs");
+    const config = getConfig();
+
+    // Recursively collect all files (moved outside withProgress)
+    const files: { localPath: string; relativePath: string }[] = [];
+
+    async function scanDirectory(dirPath: string, relativeTo: string) {
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        const relativePath = path.relative(relativeTo, fullPath);
+
+        if (entry.isDirectory()) {
+          await scanDirectory(fullPath, relativeTo);
+        } else if (entry.isFile()) {
+          files.push({
+            localPath: fullPath,
+            relativePath: relativePath.replace(/\\/g, "/"), // Normalize to forward slashes
+          });
+        }
+      }
+    }
+
+    // Scan directory first
+    await scanDirectory(folderPath, folderPath);
+
+    if (files.length === 0) {
+      showInformationMessage("No files found in the selected folder");
+      return;
+    }
+
+    await withProgress(
+      {
+        title: `Uploading folder "${folderName}"`,
+        location: vscode.ProgressLocation.Notification,
+        cancellable: true,
+      },
+      async (progress, token) => {
+        progress.report({
+          message: `Found ${files.length} file${files.length > 1 ? "s" : ""}, starting upload...`
+        });
+
+        // Upload each file
+        let uploadedCount = 0;
+        for (const file of files) {
+          if (token.isCancellationRequested) {
+            throw new Error("Upload cancelled");
+          }
+
+          const originalFileName = path.basename(file.relativePath);
+          const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
+          const fileDir = path.dirname(file.relativePath);
+          const s3Key = joinPath(
+            prefix,
+            folderName,
+            fileDir === "." ? fileName : joinPath(fileDir, fileName)
+          );
+
+          progress.report({
+            message: `Uploading ${uploadedCount + 1}/${files.length}: ${file.relativePath}`,
+            increment: (1 / files.length) * 100,
+          });
+
+          await uploadFile(bucket, s3Key, file.localPath);
+          uploadedCount++;
+        }
+
+        progress.report({ message: "Upload completed!" });
+      }
     );
 
-    // TODO: Implement recursive folder upload
-    // This would involve:
-    // 1. Walking the directory tree
-    // 2. Reading all files
-    // 3. Uploading with proper key structure
-    // 4. Progress tracking for the entire operation
-  } catch (error) {
-    showErrorMessage(
-      `Failed to upload folder: ${
-        error instanceof Error ? error.message : error
-      }`
+    // Invalidate cache and refresh
+    s3Cache.invalidate(bucket, prefix);
+    s3Explorer.refresh(node);
+
+    showInformationMessage(
+      `Uploaded folder "${folderName}" with ${files.length} file${files.length > 1 ? "s" : ""} successfully`
     );
+  } catch (error) {
+    if (error instanceof Error && error.message === "Upload cancelled") {
+      showInformationMessage("Folder upload cancelled");
+    } else {
+      showErrorMessage(
+        `Failed to upload folder: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
+    }
   }
 }
 
@@ -651,10 +725,63 @@ async function handleDelete(node: any) {
         return;
       }
 
-      showInformationMessage(
-        "Folder deletion functionality will be implemented with recursive deletion"
+      await withProgress(
+        {
+          title: `Deleting folder "${node.prefix}"`,
+          location: vscode.ProgressLocation.Notification,
+          cancellable: false,
+        },
+        async (progress) => {
+          progress.report({ message: "Listing objects in folder..." });
+
+          // List all objects under the prefix
+          const objects = await listAllObjects(node.bucket, node.prefix);
+
+          if (objects.length === 0) {
+            // Empty folder - just delete the folder marker
+            progress.report({ message: "Deleting empty folder..." });
+            await deleteObject(node.bucket, node.prefix);
+          } else {
+            // Delete all objects in batches
+            progress.report({
+              message: `Found ${objects.length} object${objects.length > 1 ? "s" : ""}, deleting...`
+            });
+
+            const batchSize = 1000; // S3 deleteObjects supports up to 1000 keys per request
+            const totalBatches = Math.ceil(objects.length / batchSize);
+
+            for (let i = 0; i < totalBatches; i++) {
+              const start = i * batchSize;
+              const end = Math.min(start + batchSize, objects.length);
+              const batch = objects.slice(start, end);
+              const keys = batch.map(obj => obj.key);
+
+              progress.report({
+                message: `Deleting batch ${i + 1}/${totalBatches} (${keys.length} objects)...`,
+                increment: (1 / totalBatches) * 100,
+              });
+
+              await deleteObjects(node.bucket, keys);
+            }
+
+            // Delete the folder marker if it exists
+            progress.report({ message: "Cleaning up folder marker..." });
+            try {
+              await deleteObject(node.bucket, node.prefix);
+            } catch (error) {
+              // Ignore error if folder marker doesn't exist
+              console.log("Folder marker already deleted or doesn't exist");
+            }
+          }
+
+          progress.report({ message: "Deletion completed!" });
+        }
       );
-      // TODO: Implement recursive folder deletion
+
+      s3Cache.invalidate(node.bucket);
+      s3Explorer.refresh();
+
+      showInformationMessage("Folder deleted successfully");
     }
   } catch (error) {
     showErrorMessage(
