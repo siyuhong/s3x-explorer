@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { S3Explorer } from "./tree/explorer";
 import { S3FileSystemProvider } from "./fs/provider";
-import { listBuckets, searchObjects } from "./s3/listing";
+import { listBuckets, searchObjects, listAllObjects } from "./s3/listing";
 import {
   createFolder,
   uploadFile,
@@ -675,55 +675,151 @@ async function handleMove(node: any) {
 
 async function handleRename(node: any) {
   try {
-    if (!isObjectNode(node)) {
-      showErrorMessage("Can only rename files");
-      return;
+    if (isPrefixNode(node)) {
+      // Handle folder rename
+      await handleRenameFolder(node);
+    } else if (isObjectNode(node)) {
+      // Handle file rename
+      await handleRenameFile(node);
+    } else {
+      showErrorMessage("Can only rename files or folders");
     }
-
-    const oldFileName = getFileName(node.key);
-    const newFileName = await vscode.window.showInputBox({
-      title: "Rename File",
-      placeHolder: "Enter new file name",
-      value: oldFileName,
-      validateInput: (value) => {
-        if (!value || value.trim().length === 0) {
-          return "File name cannot be empty";
-        }
-        if (value.includes("/")) {
-          return "File name cannot contain slashes";
-        }
-        if (value === oldFileName) {
-          return "New name must be different from current name";
-        }
-        return undefined;
-      },
-    });
-
-    if (!newFileName) {
-      return;
-    }
-
-    // Calculate new key by replacing the filename part
-    const keyParts = node.key.split("/");
-    keyParts[keyParts.length - 1] = newFileName;
-    const newKey = keyParts.join("/");
-
-    await withMoveProgress(async (progress) => {
-      progress.report({ message: `Renaming ${oldFileName}...` });
-      await moveObject(node.bucket, node.key, node.bucket, newKey);
-    }, 1);
-
-    // Invalidate cache and refresh
-    const prefix = keyParts.slice(0, -1).join("/");
-    s3Cache.invalidate(node.bucket, prefix);
-    s3Explorer.refresh();
-
-    showInformationMessage(`Renamed "${oldFileName}" to "${newFileName}" successfully`);
   } catch (error) {
     showErrorMessage(
       `Failed to rename: ${error instanceof Error ? error.message : error}`
     );
   }
+}
+
+async function handleRenameFile(node: any) {
+  const oldFileName = getFileName(node.key);
+  const newFileName = await vscode.window.showInputBox({
+    title: "Rename File",
+    placeHolder: "Enter new file name",
+    value: oldFileName,
+    validateInput: (value) => {
+      if (!value || value.trim().length === 0) {
+        return "File name cannot be empty";
+      }
+      if (value.includes("/")) {
+        return "File name cannot contain slashes";
+      }
+      if (value === oldFileName) {
+        return "New name must be different from current name";
+      }
+      return undefined;
+    },
+  });
+
+  if (!newFileName) {
+    return;
+  }
+
+  // Calculate new key by replacing the filename part
+  const keyParts = node.key.split("/");
+  keyParts[keyParts.length - 1] = newFileName;
+  const newKey = keyParts.join("/");
+
+  await withMoveProgress(async (progress) => {
+    progress.report({ message: `Renaming ${oldFileName}...` });
+    await moveObject(node.bucket, node.key, node.bucket, newKey);
+  }, 1);
+
+  // Invalidate cache and refresh
+  const prefix = keyParts.slice(0, -1).join("/");
+  s3Cache.invalidate(node.bucket, prefix);
+  s3Explorer.refresh();
+
+  showInformationMessage(`Renamed "${oldFileName}" to "${newFileName}" successfully`);
+}
+
+async function handleRenameFolder(node: any) {
+  const oldPrefix = node.prefix;
+  const oldFolderName = oldPrefix.endsWith("/")
+    ? oldPrefix.slice(0, -1).split("/").pop()
+    : oldPrefix.split("/").pop();
+
+  const newFolderName = await vscode.window.showInputBox({
+    title: "Rename Folder",
+    placeHolder: "Enter new folder name",
+    value: oldFolderName,
+    validateInput: (value) => {
+      if (!value || value.trim().length === 0) {
+        return "Folder name cannot be empty";
+      }
+      if (value.includes("/")) {
+        return "Folder name cannot contain slashes";
+      }
+      if (value === oldFolderName) {
+        return "New name must be different from current name";
+      }
+      return undefined;
+    },
+  });
+
+  if (!newFolderName) {
+    return;
+  }
+
+  // Calculate new prefix by replacing the folder name part
+  const prefixParts = oldPrefix.split("/").filter(p => p);
+  prefixParts[prefixParts.length - 1] = newFolderName;
+  const newPrefix = prefixParts.join("/") + "/";
+
+  await withProgress(
+    {
+      title: `Renaming folder "${oldFolderName}"`,
+      location: vscode.ProgressLocation.Notification,
+      cancellable: false,
+    },
+    async (progress) => {
+      progress.report({ message: "Listing objects in folder..." });
+
+      // List all objects under the old prefix
+      const objects = await listAllObjects(node.bucket, oldPrefix);
+
+      if (objects.length === 0) {
+        // Empty folder - just create the new folder marker and delete old one
+        await createFolder(node.bucket, newPrefix);
+        await deleteObject(node.bucket, oldPrefix);
+      } else {
+        // Rename each object by moving to new prefix
+        const totalObjects = objects.length;
+        let processedObjects = 0;
+
+        for (const obj of objects) {
+          const relativePath = obj.key.substring(oldPrefix.length);
+          const newKey = newPrefix + relativePath;
+
+          progress.report({
+            message: `Moving ${processedObjects + 1}/${totalObjects}: ${relativePath}`,
+            increment: (1 / totalObjects) * 100,
+          });
+
+          await moveObject(node.bucket, obj.key, node.bucket, newKey);
+          processedObjects++;
+        }
+
+        // Delete the old folder marker if it exists
+        progress.report({ message: "Cleaning up old folder..." });
+        try {
+          await deleteObject(node.bucket, oldPrefix);
+        } catch (error) {
+          // Ignore error if folder marker doesn't exist
+          console.log("Old folder marker already deleted or doesn't exist");
+        }
+      }
+
+      progress.report({ message: "Completing rename..." });
+    }
+  );
+
+  // Invalidate cache and refresh
+  const parentPrefix = prefixParts.slice(0, -1).join("/");
+  s3Cache.invalidate(node.bucket, parentPrefix);
+  s3Explorer.refresh();
+
+  showInformationMessage(`Renamed folder "${oldFolderName}" to "${newFolderName}" successfully`);
 }
 
 async function handleGeneratePresignedUrl(node: any) {
