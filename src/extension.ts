@@ -40,6 +40,7 @@ import {
   promptForDestructiveConfirmation,
   promptForMoveOrCopy,
   promptForConfigurationSetup,
+  promptForS3FolderPath,
   showFilePicker,
   showFolderPicker,
   showSaveDialog,
@@ -1077,13 +1078,8 @@ async function handleMove(node: any) {
       return;
     }
 
-    // Get target prefix
-    const targetPrefix = await vscode.window.showInputBox({
-      title: "Destination Path",
-      placeHolder: "Enter destination path (leave empty for root)",
-      prompt: `Moving ${itemType}: ${itemName}`,
-      value: "",
-    });
+    // Use folder picker to select target prefix
+    const targetPrefix = await promptForS3FolderPath(targetBucket, "");
 
     if (targetPrefix === undefined) {
       return;

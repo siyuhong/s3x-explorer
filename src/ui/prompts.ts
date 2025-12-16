@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { S3Bucket } from "../types";
-import { listBuckets } from "../s3/listing";
+import { listBuckets, listObjects } from "../s3/listing";
 import { isValidS3Key, sanitizeS3Key, getFileName } from "../util/paths";
 import { getConfig, validateConfig } from "../s3/client";
 
@@ -101,6 +101,124 @@ export async function promptForFolderName(
   });
 
   return input;
+}
+
+export async function promptForS3FolderPath(
+  bucket: string,
+  initialPrefix = ""
+): Promise<string | undefined> {
+  interface FolderPickItem extends vscode.QuickPickItem {
+    prefix: string;
+    isBack: boolean;
+    isRoot: boolean;
+    isCurrent: boolean;
+  }
+
+  let currentPrefix = initialPrefix;
+
+  while (true) {
+    try {
+      // List folders at current level
+      const result = await listObjects(bucket, currentPrefix);
+
+      const items: FolderPickItem[] = [];
+
+      // Add "Select this folder" option
+      items.push({
+        label: "$(check) Select this folder",
+        description: currentPrefix || "(root)",
+        prefix: currentPrefix,
+        isBack: false,
+        isRoot: false,
+        isCurrent: true,
+      });
+
+      // Add back option if not at root
+      if (currentPrefix) {
+        const parentPrefix = currentPrefix.split("/").slice(0, -2).join("/");
+        const finalParent = parentPrefix ? parentPrefix + "/" : "";
+        items.push({
+          label: "$(arrow-up) ..",
+          description: "Go back to parent folder",
+          prefix: finalParent,
+          isBack: true,
+          isRoot: false,
+          isCurrent: false,
+        });
+      }
+
+      // Add root option if not at root
+      if (currentPrefix) {
+        items.push({
+          label: "$(home) Root",
+          description: "Go to root folder",
+          prefix: "",
+          isBack: false,
+          isRoot: true,
+          isCurrent: false,
+        });
+      }
+
+      // Add separator
+      if (result.prefixes.length > 0) {
+        items.push({
+          label: "",
+          kind: vscode.QuickPickItemKind.Separator,
+          prefix: "",
+          isBack: false,
+          isRoot: false,
+          isCurrent: false,
+        } as FolderPickItem);
+      }
+
+      // Add folders
+      for (const prefixObj of result.prefixes) {
+        const folderName = prefixObj.prefix.substring(currentPrefix.length);
+        const displayName = folderName.endsWith("/")
+          ? folderName.slice(0, -1)
+          : folderName;
+
+        items.push({
+          label: `$(folder) ${displayName}`,
+          description: prefixObj.prefix,
+          prefix: prefixObj.prefix,
+          isBack: false,
+          isRoot: false,
+          isCurrent: false,
+        });
+      }
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: `Bucket: ${bucket} | Current: ${currentPrefix || "(root)"}`,
+        title: "Select Destination Folder",
+      });
+
+      if (!selected) {
+        return undefined; // User cancelled
+      }
+
+      if (selected.isCurrent) {
+        // User selected current folder
+        return currentPrefix;
+      }
+
+      if (selected.isBack || selected.isRoot) {
+        // Navigate to parent or root
+        currentPrefix = selected.prefix;
+        continue;
+      }
+
+      // Navigate into subfolder
+      currentPrefix = selected.prefix;
+    } catch (error) {
+      showErrorMessage(
+        `Failed to list folders: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
+      return undefined;
+    }
+  }
 }
 
 export async function promptForFileName(
