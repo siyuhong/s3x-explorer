@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { S3Explorer } from "./tree/explorer";
 import { S3FileSystemProvider } from "./fs/provider";
-import { listBuckets, searchObjects, listAllObjects } from "./s3/listing";
+import { listBuckets, searchObjects, listAllObjectsRecursive } from "./s3/listing";
 import {
   createFolder,
   uploadFile,
@@ -58,6 +58,17 @@ import {
 let s3Explorer: S3Explorer;
 let s3FileSystemProvider: S3FileSystemProvider;
 let s3TreeView: vscode.TreeView<any>;
+
+// Clipboard for copy/cut operations
+interface ClipboardItem {
+  bucket: string;
+  key?: string;
+  prefix?: string;
+  operation: "copy" | "cut";
+  itemType: "file" | "folder";
+}
+
+let clipboard: ClipboardItem | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("S3/R2 Explorer is activating...");
@@ -190,6 +201,18 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.copy", async (node) => {
       await handleCopy(node);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.cut", async (node) => {
+      await handleCut(node);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.paste", async (node) => {
+      await handlePaste(node);
     })
   );
 
@@ -734,8 +757,8 @@ async function handleDelete(node: any) {
         async (progress) => {
           progress.report({ message: "Listing objects in folder..." });
 
-          // List all objects under the prefix
-          const objects = await listAllObjects(node.bucket, node.prefix);
+          // List all objects under the prefix (recursive to get all nested files)
+          const objects = await listAllObjectsRecursive(node.bucket, node.prefix);
 
           if (objects.length === 0) {
             // Empty folder - just delete the folder marker
@@ -791,13 +814,389 @@ async function handleDelete(node: any) {
 }
 
 async function handleCopy(node: any) {
-  showInformationMessage("Copy functionality will be implemented");
-  // TODO: Implement copy with target selection
+  try {
+    if (!isObjectNode(node) && !isPrefixNode(node)) {
+      showErrorMessage("Can only copy files or folders");
+      return;
+    }
+
+    // Store in clipboard
+    if (isObjectNode(node)) {
+      clipboard = {
+        bucket: node.bucket,
+        key: node.key,
+        operation: "copy",
+        itemType: "file",
+      };
+      showInformationMessage(`Copied "${getFileName(node.key)}" to clipboard`);
+    } else if (isPrefixNode(node)) {
+      clipboard = {
+        bucket: node.bucket,
+        prefix: node.prefix,
+        operation: "copy",
+        itemType: "folder",
+      };
+      const folderName = node.prefix.endsWith("/")
+        ? node.prefix.slice(0, -1).split("/").pop()
+        : node.prefix.split("/").pop();
+      showInformationMessage(`Copied folder "${folderName}" to clipboard`);
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to copy: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handleCut(node: any) {
+  try {
+    if (!isObjectNode(node) && !isPrefixNode(node)) {
+      showErrorMessage("Can only cut files or folders");
+      return;
+    }
+
+    // Store in clipboard with cut operation
+    if (isObjectNode(node)) {
+      clipboard = {
+        bucket: node.bucket,
+        key: node.key,
+        operation: "cut",
+        itemType: "file",
+      };
+      showInformationMessage(`Cut "${getFileName(node.key)}" to clipboard`);
+    } else if (isPrefixNode(node)) {
+      clipboard = {
+        bucket: node.bucket,
+        prefix: node.prefix,
+        operation: "cut",
+        itemType: "folder",
+      };
+      const folderName = node.prefix.endsWith("/")
+        ? node.prefix.slice(0, -1).split("/").pop()
+        : node.prefix.split("/").pop();
+      showInformationMessage(`Cut folder "${folderName}" to clipboard`);
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to cut: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handlePaste(node: any) {
+  try {
+    if (!clipboard) {
+      showErrorMessage("Clipboard is empty. Copy or cut an item first.");
+      return;
+    }
+
+    // Determine target location
+    let targetBucket: string;
+    let targetPrefix = "";
+
+    if (isBucketNode(node)) {
+      targetBucket = node.bucket;
+    } else if (isPrefixNode(node)) {
+      targetBucket = node.bucket;
+      targetPrefix = node.prefix;
+    } else {
+      showErrorMessage("Please select a bucket or folder to paste into");
+      return;
+    }
+
+    // Perform paste operation
+    if (clipboard.itemType === "file" && clipboard.key) {
+      await handlePasteFile(clipboard, targetBucket, targetPrefix);
+    } else if (clipboard.itemType === "folder" && clipboard.prefix) {
+      await handlePasteFolder(clipboard, targetBucket, targetPrefix);
+    }
+
+    // Clear clipboard if it was a cut operation
+    if (clipboard.operation === "cut") {
+      clipboard = undefined;
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to paste: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handlePasteFile(
+  clipboardItem: ClipboardItem,
+  targetBucket: string,
+  targetPrefix: string
+) {
+  const fileName = getFileName(clipboardItem.key!);
+  const targetKey = targetPrefix ? joinPath(targetPrefix, fileName) : fileName;
+
+  if (clipboardItem.operation === "copy") {
+    await withCopyProgress(async (progress) => {
+      progress.report({ message: `Copying ${fileName}...` });
+      await copyObject(clipboardItem.bucket, clipboardItem.key!, targetBucket, targetKey);
+    }, 1);
+
+    s3Cache.invalidate(targetBucket);
+    s3Explorer.refresh();
+
+    showInformationMessage(`Pasted "${fileName}" successfully`);
+  } else {
+    // Cut operation - move the file
+    await withMoveProgress(async (progress) => {
+      progress.report({ message: `Moving ${fileName}...` });
+      await moveObject(clipboardItem.bucket, clipboardItem.key!, targetBucket, targetKey);
+    }, 1);
+
+    s3Cache.invalidate(clipboardItem.bucket);
+    s3Cache.invalidate(targetBucket);
+    s3Explorer.refresh();
+
+    showInformationMessage(`Moved "${fileName}" successfully`);
+  }
+}
+
+async function handlePasteFolder(
+  clipboardItem: ClipboardItem,
+  targetBucket: string,
+  targetPrefix: string
+) {
+  const sourceFolderName = clipboardItem.prefix!.endsWith("/")
+    ? clipboardItem.prefix!.slice(0, -1).split("/").pop()
+    : clipboardItem.prefix!.split("/").pop();
+
+  const targetFolderPrefix = targetPrefix
+    ? joinPath(targetPrefix, sourceFolderName!) + "/"
+    : sourceFolderName + "/";
+
+  const operationName = clipboardItem.operation === "copy" ? "Copying" : "Moving";
+
+  await withProgress(
+    {
+      title: `${operationName} folder "${sourceFolderName}"`,
+      location: vscode.ProgressLocation.Notification,
+      cancellable: false,
+    },
+    async (progress) => {
+      progress.report({ message: "Listing objects in folder..." });
+
+      // List all objects under the source prefix (recursive to get all nested files)
+      const objects = await listAllObjectsRecursive(clipboardItem.bucket, clipboardItem.prefix!);
+
+      if (objects.length === 0) {
+        // Empty folder - just create the target folder marker
+        await createFolder(targetBucket, targetFolderPrefix);
+
+        if (clipboardItem.operation === "cut") {
+          await deleteObject(clipboardItem.bucket, clipboardItem.prefix!);
+        }
+      } else {
+        // Process each object
+        const totalObjects = objects.length;
+        let processedObjects = 0;
+
+        for (const obj of objects) {
+          const relativePath = obj.key.substring(clipboardItem.prefix!.length);
+          const targetKey = targetFolderPrefix + relativePath;
+
+          progress.report({
+            message: `${operationName} ${processedObjects + 1}/${totalObjects}: ${relativePath}`,
+            increment: (1 / totalObjects) * 100,
+          });
+
+          if (clipboardItem.operation === "copy") {
+            await copyObject(clipboardItem.bucket, obj.key, targetBucket, targetKey);
+          } else {
+            await moveObject(clipboardItem.bucket, obj.key, targetBucket, targetKey);
+          }
+          processedObjects++;
+        }
+
+        // Create target folder marker if it doesn't exist
+        try {
+          await createFolder(targetBucket, targetFolderPrefix);
+        } catch (error) {
+          // Ignore if already exists
+        }
+
+        if (clipboardItem.operation === "cut") {
+          progress.report({ message: "Cleaning up source folder..." });
+
+          // List all remaining objects with the source prefix to clean up any folder markers
+          const remainingObjects = await listAllObjectsRecursive(clipboardItem.bucket, clipboardItem.prefix!);
+
+          // Delete any remaining folder markers (objects ending with /)
+          for (const obj of remainingObjects) {
+            if (obj.key.endsWith("/")) {
+              try {
+                await deleteObject(clipboardItem.bucket, obj.key);
+              } catch (error) {
+                console.log(`Failed to delete folder marker ${obj.key}:`, error);
+              }
+            }
+          }
+
+          // Delete the main folder marker
+          try {
+            await deleteObject(clipboardItem.bucket, clipboardItem.prefix!);
+          } catch (error) {
+            console.log("Source folder marker already deleted or doesn't exist");
+          }
+        }
+      }
+
+      progress.report({ message: `${operationName} completed!` });
+    }
+  );
+
+  if (clipboardItem.operation === "cut") {
+    s3Cache.invalidate(clipboardItem.bucket);
+  }
+  s3Cache.invalidate(targetBucket);
+  s3Explorer.refresh();
+
+  const operationPast = clipboardItem.operation === "copy" ? "Copied" : "Moved";
+  showInformationMessage(`${operationPast} folder "${sourceFolderName}" successfully`);
 }
 
 async function handleMove(node: any) {
-  showInformationMessage("Move functionality will be implemented");
-  // TODO: Implement move with target selection
+  try {
+    if (!isObjectNode(node) && !isPrefixNode(node)) {
+      showErrorMessage("Can only move files or folders");
+      return;
+    }
+
+    // Get source info
+    const sourceBucket = isObjectNode(node) ? node.bucket : node.bucket;
+    const sourceKey = isObjectNode(node) ? node.key : node.prefix;
+    const itemType = isObjectNode(node) ? "file" : "folder";
+    const itemName = isObjectNode(node) ? getFileName(node.key) : node.prefix;
+
+    // Select target bucket
+    const targetBucket = await promptForBucket("Select destination bucket");
+    if (!targetBucket) {
+      return;
+    }
+
+    // Get target prefix
+    const targetPrefix = await vscode.window.showInputBox({
+      title: "Destination Path",
+      placeHolder: "Enter destination path (leave empty for root)",
+      prompt: `Moving ${itemType}: ${itemName}`,
+      value: "",
+    });
+
+    if (targetPrefix === undefined) {
+      return;
+    }
+
+    if (isObjectNode(node)) {
+      // Move single file
+      await handleMoveFile(node, targetBucket, targetPrefix);
+    } else if (isPrefixNode(node)) {
+      // Move folder
+      await handleMoveFolder(node, targetBucket, targetPrefix);
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to move: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handleMoveFile(node: any, targetBucket: string, targetPrefix: string) {
+  const fileName = getFileName(node.key);
+  const targetKey = targetPrefix ? joinPath(targetPrefix, fileName) : fileName;
+
+  await withMoveProgress(async (progress) => {
+    progress.report({ message: `Moving ${fileName}...` });
+    await moveObject(node.bucket, node.key, targetBucket, targetKey);
+  }, 1);
+
+  s3Cache.invalidate(node.bucket);
+  s3Cache.invalidate(targetBucket);
+  s3Explorer.refresh();
+
+  showInformationMessage(`Moved "${fileName}" successfully`);
+}
+
+async function handleMoveFolder(node: any, targetBucket: string, targetPrefix: string) {
+  const sourceFolderName = node.prefix.endsWith("/")
+    ? node.prefix.slice(0, -1).split("/").pop()
+    : node.prefix.split("/").pop();
+
+  const targetFolderPrefix = targetPrefix
+    ? joinPath(targetPrefix, sourceFolderName) + "/"
+    : sourceFolderName + "/";
+
+  await withProgress(
+    {
+      title: `Moving folder "${sourceFolderName}"`,
+      location: vscode.ProgressLocation.Notification,
+      cancellable: false,
+    },
+    async (progress) => {
+      progress.report({ message: "Listing objects in folder..." });
+
+      // List all objects under the source prefix (recursive to get all nested files)
+      const objects = await listAllObjectsRecursive(node.bucket, node.prefix);
+
+      if (objects.length === 0) {
+        // Empty folder - just create the target folder marker and delete source
+        await createFolder(targetBucket, targetFolderPrefix);
+        await deleteObject(node.bucket, node.prefix);
+      } else {
+        // Move each object
+        const totalObjects = objects.length;
+        let processedObjects = 0;
+
+        for (const obj of objects) {
+          const relativePath = obj.key.substring(node.prefix.length);
+          const targetKey = targetFolderPrefix + relativePath;
+
+          progress.report({
+            message: `Moving ${processedObjects + 1}/${totalObjects}: ${relativePath}`,
+            increment: (1 / totalObjects) * 100,
+          });
+
+          await moveObject(node.bucket, obj.key, targetBucket, targetKey);
+          processedObjects++;
+        }
+
+        // Delete source folder marker
+        progress.report({ message: "Cleaning up source folder..." });
+
+        // List remaining objects to clean up all folder markers
+        const remainingObjects = await listAllObjectsRecursive(node.bucket, node.prefix);
+
+        // Delete any remaining folder markers (objects ending with /)
+        for (const obj of remainingObjects) {
+          if (obj.key.endsWith("/")) {
+            try {
+              await deleteObject(node.bucket, obj.key);
+            } catch (error) {
+              console.log(`Failed to delete folder marker ${obj.key}:`, error);
+            }
+          }
+        }
+
+        // Delete the main folder marker
+        try {
+          await deleteObject(node.bucket, node.prefix);
+        } catch (error) {
+          // Ignore error if folder marker doesn't exist
+          console.log("Source folder marker already deleted or doesn't exist");
+        }
+      }
+
+      progress.report({ message: "Move completed!" });
+    }
+  );
+
+  s3Cache.invalidate(node.bucket);
+  s3Cache.invalidate(targetBucket);
+  s3Explorer.refresh();
+
+  showInformationMessage(`Moved folder "${sourceFolderName}" successfully`);
 }
 
 async function handleRename(node: any) {
@@ -902,8 +1301,8 @@ async function handleRenameFolder(node: any) {
     async (progress) => {
       progress.report({ message: "Listing objects in folder..." });
 
-      // List all objects under the old prefix
-      const objects = await listAllObjects(node.bucket, oldPrefix);
+      // List all objects under the old prefix (recursive to get all nested files)
+      const objects = await listAllObjectsRecursive(node.bucket, oldPrefix);
 
       if (objects.length === 0) {
         // Empty folder - just create the new folder marker and delete old one
@@ -929,6 +1328,22 @@ async function handleRenameFolder(node: any) {
 
         // Delete the old folder marker if it exists
         progress.report({ message: "Cleaning up old folder..." });
+
+        // List remaining objects to clean up all folder markers
+        const remainingObjects = await listAllObjectsRecursive(node.bucket, oldPrefix);
+
+        // Delete any remaining folder markers (objects ending with /)
+        for (const obj of remainingObjects) {
+          if (obj.key.endsWith("/")) {
+            try {
+              await deleteObject(node.bucket, obj.key);
+            } catch (error) {
+              console.log(`Failed to delete folder marker ${obj.key}:`, error);
+            }
+          }
+        }
+
+        // Delete the main old folder marker
         try {
           await deleteObject(node.bucket, oldPrefix);
         } catch (error) {

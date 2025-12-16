@@ -120,38 +120,78 @@ export async function listObjects(
   });
 }
 
-export async function listAllObjects(
+export async function listAllObjectsRecursive(
   bucket: string,
   prefix?: string,
   maxObjects?: number
 ): Promise<S3Object[]> {
-  const allObjects: S3Object[] = [];
-  let continuationToken: string | undefined;
-  let totalFetched = 0;
+  return withRetry(async () => {
+    const client = getS3Client();
+    const allObjects: S3Object[] = [];
+    let continuationToken: string | undefined;
+    let totalFetched = 0;
 
-  do {
-    const batchSize = maxObjects
-      ? Math.min(MAX_KEYS_PER_REQUEST, maxObjects - totalFetched)
-      : MAX_KEYS_PER_REQUEST;
+    do {
+      const batchSize = maxObjects
+        ? Math.min(MAX_KEYS_PER_REQUEST, maxObjects - totalFetched)
+        : MAX_KEYS_PER_REQUEST;
 
-    const result = await listObjects(
-      bucket,
-      prefix,
-      continuationToken,
-      batchSize
-    );
+      const input: ListObjectsV2CommandInput = {
+        Bucket: bucket,
+        MaxKeys: batchSize,
+        // Note: No Delimiter - this allows recursive listing
+        ContinuationToken: continuationToken,
+      };
 
-    allObjects.push(...result.objects);
-    totalFetched += result.objects.length;
-    continuationToken = result.continuationToken;
+      if (prefix) {
+        input.Prefix = prefix;
+      }
 
-    // Stop if we've reached the max objects limit
-    if (maxObjects && totalFetched >= maxObjects) {
-      break;
-    }
-  } while (continuationToken);
+      try {
+        const response: ListObjectsV2CommandOutput = await client.send(
+          new ListObjectsV2Command(input)
+        );
 
-  return allObjects;
+        // Parse all objects (including nested ones)
+        const objects: S3Object[] = (response.Contents || [])
+          .filter((obj) => obj.Key !== prefix) // Exclude the prefix itself if it exists as an object
+          .map((obj) => ({
+            key: obj.Key!,
+            size: obj.Size,
+            lastModified: obj.LastModified,
+            etag: obj.ETag,
+            storageClass: obj.StorageClass,
+          }));
+
+        allObjects.push(...objects);
+        totalFetched += objects.length;
+        continuationToken = response.NextContinuationToken;
+
+        // Stop if we've reached the max objects limit
+        if (maxObjects && totalFetched >= maxObjects) {
+          break;
+        }
+      } catch (error: any) {
+        if (error.code === "NoSuchBucket") {
+          throw new S3Error(
+            `Bucket '${bucket}' does not exist`,
+            error.code,
+            error.$metadata?.httpStatusCode,
+            false
+          );
+        }
+
+        throw new S3Error(
+          `Failed to list objects in bucket '${bucket}': ${error.message}`,
+          error.code,
+          error.$metadata?.httpStatusCode,
+          S3Error.isRetryable(error)
+        );
+      }
+    } while (continuationToken);
+
+    return allObjects;
+  });
 }
 
 export async function searchObjects(
@@ -163,11 +203,11 @@ export async function searchObjects(
   let allObjects: S3Object[];
 
   if (searchPrefix) {
-    // Use server-side prefix filtering
-    allObjects = await listAllObjects(bucket, searchPrefix, maxResults);
+    // Use server-side prefix filtering with recursive listing
+    allObjects = await listAllObjectsRecursive(bucket, searchPrefix, maxResults);
   } else {
-    // Get all objects in bucket (up to maxResults)
-    allObjects = await listAllObjects(bucket, undefined, maxResults);
+    // Get all objects in bucket (up to maxResults) with recursive listing
+    allObjects = await listAllObjectsRecursive(bucket, undefined, maxResults);
   }
 
   // Apply client-side "contains" filter if specified

@@ -148,6 +148,16 @@
         "icon": "$(copy)"
       },
       {
+        "command": "s3x.cut",
+        "title": "Cut",
+        "icon": "$(scissors)"
+      },
+      {
+        "command": "s3x.paste",
+        "title": "Paste",
+        "icon": "$(clippy)"
+      },
+      {
         "command": "s3x.move",
         "title": "Move",
         "icon": "$(arrow-right)"
@@ -269,13 +279,23 @@
         },
         {
           "command": "s3x.copy",
-          "when": "view == s3xExplorer && viewItem == object",
+          "when": "view == s3xExplorer && (viewItem == object || viewItem == prefix)",
           "group": "3_actions@3"
+        },
+        {
+          "command": "s3x.cut",
+          "when": "view == s3xExplorer && (viewItem == object || viewItem == prefix)",
+          "group": "3_actions@4"
+        },
+        {
+          "command": "s3x.paste",
+          "when": "view == s3xExplorer && (viewItem == bucket || viewItem == prefix)",
+          "group": "3_actions@5"
         },
         {
           "command": "s3x.move",
           "when": "view == s3xExplorer && viewItem == object",
-          "group": "3_actions@4"
+          "group": "3_actions@6"
         },
         {
           "command": "s3x.delete",
