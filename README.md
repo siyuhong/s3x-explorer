@@ -20,6 +20,7 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 - **Tree View**: Browse buckets and objects like a local file system
 - **Pagination**: Efficient loading with "Load more..." for large buckets
 - **Icons & Metadata**: File type icons with size and modification date
+- **Tree Filtering**: Real-time fuzzy filtering with Ctrl/Cmd+F (filters buckets, folders, and files)
 - **Search**: Server-side prefix search and client-side content filtering
 
 ### 📝 Inline Editing
@@ -34,7 +35,8 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 - **Upload**: Drag & drop files or use context menu
 - **Paste Upload**: Copy images to clipboard and paste directly
 - **Download**: Save objects to local filesystem
-- **CRUD Operations**: Create folders, rename, delete, copy, move
+- **Drag & Drop Move**: Drag files/folders within tree to move between locations
+- **CRUD Operations**: Create folders, rename, delete, copy, cut, paste, move
 - **Bulk Operations**: Multi-select support with progress tracking
 - **Multipart Uploads**: Efficient handling of large files (>100MB)
 
@@ -164,6 +166,13 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 - **Paste images** - Copy image to clipboard, focus tree, press Ctrl+V
 - **Progress tracking** shows upload status
 
+#### Moving Files/Folders
+
+- **Drag & drop** files or folders within the tree to move them
+- **Cut & paste** - Right-click → "Cut", then right-click destination → "Paste"
+- **Move command** - Right-click object → "Move" to select destination
+- **Bulk move** - Select multiple items and move them together
+
 #### Creating Folders
 
 - **Right-click** bucket/folder → "New Folder"
@@ -174,10 +183,13 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 - **Right-click** object → "Download"
 - Choose save location
 
-#### Searching
+#### Searching & Filtering
 
-- **Command Palette** → "S3: Search in Bucket"
-- Choose **prefix search** (server-side, faster) or **contains search** (client-side)
+- **Tree Filtering** - Press **Ctrl/Cmd+F** to filter the tree view in real-time
+  - Fuzzy matching across bucket names, folder paths, and file names
+  - Press **Escape** to clear the filter
+- **Bucket Search** - Command Palette → "S3: Search in Bucket"
+  - Choose **prefix search** (server-side, faster) or **contains search** (client-side)
 
 ### Advanced Features
 
@@ -274,6 +286,8 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 | ------------------------------ | ------------------------------------ | ---------- |
 | `S3: Configure S3/R2 Settings` | Open configuration wizard            |            |
 | `S3: S3/R2 Setup Wizard`       | Step-by-step setup wizard            |            |
+| `S3: Filter Tree View`         | Filter tree by name (fuzzy match)    | Ctrl/Cmd+F |
+| `S3: Clear Filter`             | Clear active tree filter             | Escape     |
 | `S3: Search in Bucket`         | Search objects by prefix/content     |            |
 | `S3: Refresh`                  | Refresh tree view                    |            |
 | `S3: Force Refresh All`        | Clear cache and refresh all          |            |
@@ -284,6 +298,8 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 
 | Shortcut                           | Action                            | Context                     |
 | ---------------------------------- | --------------------------------- | --------------------------- |
+| **Ctrl+F** / **Cmd+F**             | Filter tree view                  | S3/R2 Explorer tree focused |
+| **Escape**                         | Clear tree filter                 | S3/R2 Explorer tree focused |
 | **Ctrl+V** / **Cmd+V**             | Paste upload image from clipboard | S3/R2 Explorer tree focused |
 | **Ctrl+Shift+V** / **Cmd+Shift+V** | Paste upload (alternative)        | S3/R2 Explorer tree focused |
 
@@ -295,11 +311,14 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 - **Paste Upload** - Upload image from clipboard (Ctrl/Cmd+V)
 - **Download** - Download object to local file
 - **Rename** - Rename object or folder
-- **Copy** - Copy object to another location
-- **Move** - Move object to another location
+- **Copy** - Copy object to clipboard for later paste
+- **Cut** - Cut object to clipboard for move operation
+- **Paste** - Paste copied/cut object to current location
+- **Move** - Move object to another location (with destination picker)
 - **Delete** - Delete object or folder
 - **Generate Presigned URL** - Create temporary shareable link with expiry
 - **Generate Public URL** - Create permanent public URL (with custom domain support)
+- **Preview Media** - Preview images, videos, and audio files
 - **Show Object Metadata** - View detailed metadata
 
 ## 🔒 Security Notes
