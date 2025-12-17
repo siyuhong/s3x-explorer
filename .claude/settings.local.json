@@ -4,7 +4,8 @@
       "Bash(npm run compile:*)",
       "Bash(npm run lint)",
       "Bash(npm run test:unit:*)",
-      "mcp__filesystem-with-morph__edit_file"
+      "mcp__filesystem-with-morph__edit_file",
+      "Bash(code:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import { listBuckets, listObjects } from "../s3/listing";
+import { listBuckets, listObjects, listAllObjectsRecursive } from "../s3/listing";
 import { S3Error } from "../types";
 import { s3Cache } from "../util/cache";
-import { uploadFile } from "../s3/ops";
-import { joinPath, applyFileNameTemplate } from "../util/paths";
+import { uploadFile, copyObject, moveObject, createFolder, deleteObject } from "../s3/ops";
+import { joinPath, applyFileNameTemplate, getFileName } from "../util/paths";
 import { getConfig } from "../s3/client";
 import {
   BaseTreeNode,
@@ -503,26 +503,60 @@ export class S3Explorer
     treeDataTransfer: vscode.DataTransfer,
     token: vscode.CancellationToken
   ): Promise<void> {
-    const items = source.filter(isObjectNode); // Only allow dragging objects for now
+    console.log("[S3X Drag] handleDrag called with", source.length, "items");
+
+    // Allow dragging both objects (files) and prefixes (folders)
+    const items = source.filter((node) => isObjectNode(node) || isPrefixNode(node));
+
+    console.log("[S3X Drag] Filtered to", items.length, "draggable items");
 
     if (items.length === 0) {
+      console.log("[S3X Drag] No draggable items found");
       return;
     }
 
-    // Store the source nodes for internal drag/drop
+    // Create serializable data without circular references
+    const serializableItems = items.map((item) => {
+      if (isObjectNode(item)) {
+        return {
+          type: "object" as const,
+          bucket: item.bucket,
+          key: item.key,
+          size: item.size,
+          lastModified: item.lastModified,
+          etag: item.etag,
+        };
+      } else if (isPrefixNode(item)) {
+        return {
+          type: "prefix" as const,
+          bucket: item.bucket,
+          prefix: item.prefix,
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    // Store the serializable data for internal drag/drop
     treeDataTransfer.set(
       "application/vnd.code.tree.s3xExplorer",
-      new vscode.DataTransferItem(items)
+      new vscode.DataTransferItem(serializableItems)
     );
 
-    // Also set URI list for external applications
+    console.log("[S3X Drag] Set internal drag data");
+
+    // Also set URI list for external applications (only for object nodes)
     const uris = items
+      .filter(isObjectNode)
       .map((item) => item.resourceUri?.toString())
       .filter(Boolean);
-    treeDataTransfer.set(
-      "text/uri-list",
-      new vscode.DataTransferItem(uris.join("\n"))
-    );
+
+    if (uris.length > 0) {
+      treeDataTransfer.set(
+        "text/uri-list",
+        new vscode.DataTransferItem(uris.join("\n"))
+      );
+      console.log("[S3X Drag] Set URI list for", uris.length, "objects");
+    }
   }
 
   async handleDrop(
@@ -530,9 +564,14 @@ export class S3Explorer
     sources: vscode.DataTransfer,
     token: vscode.CancellationToken
   ): Promise<void> {
+    console.log("[S3X Drop] handleDrop called");
+    console.log("[S3X Drop] Target:", target ? `${target.type} - ${target.bucket}` : "undefined");
+    console.log("[S3X Drop] Available data types:", Array.from(sources).map(([key]) => key));
+
     // Handle external file drops from file system
     const filesData = sources.get("files");
     if (filesData) {
+      console.log("[S3X Drop] Handling files data drop");
       await this.handleFilesDataDrop(target, filesData.value);
       return;
     }
@@ -542,6 +581,7 @@ export class S3Explorer
       "application/vnd.code.tree.s3xExplorer"
     );
     if (internalDropData) {
+      console.log("[S3X Drop] Handling internal drop");
       await this.handleInternalDrop(target, internalDropData.value);
       return;
     }
@@ -549,9 +589,12 @@ export class S3Explorer
     // Handle URI list drops
     const uriListData = sources.get("text/uri-list");
     if (uriListData) {
+      console.log("[S3X Drop] Handling URI list drop");
       await this.handleUriListDrop(target, uriListData.value);
       return;
     }
+
+    console.log("[S3X Drop] No recognized data type found");
   }
 
   private async handleFilesDataDrop(
@@ -602,32 +645,167 @@ export class S3Explorer
 
   private async handleInternalDrop(
     target: BaseTreeNode | undefined,
-    sourceNodes: ObjectNode[]
+    sourceData: any[]
   ): Promise<void> {
     if (!target || (!isBucketNode(target) && !isPrefixNode(target))) {
       vscode.window.showErrorMessage(
-        "Can only move/copy objects to buckets or folders"
+        "Can only move items to buckets or folders"
       );
       return;
     }
 
-    const action = await vscode.window.showQuickPick(["Copy", "Move"], {
-      placeHolder: "Choose action for selected objects",
-    });
-
-    if (!action) {
-      return;
-    }
+    const targetBucket = target.bucket;
+    const targetPrefix = isPrefixNode(target) ? target.prefix : "";
 
     try {
-      // TODO: Implement copy/move logic using the s3/ops module
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Moving items",
+          cancellable: false,
+        },
+        async (progress) => {
+          let completedCount = 0;
+          const totalCount = sourceData.length;
+
+          for (const sourceItem of sourceData) {
+            if (sourceItem.type === "object") {
+              await this.handleInternalDropFileData(
+                sourceItem,
+                targetBucket,
+                targetPrefix,
+                progress,
+                completedCount,
+                totalCount
+              );
+            } else if (sourceItem.type === "prefix") {
+              await this.handleInternalDropFolderData(
+                sourceItem,
+                targetBucket,
+                targetPrefix,
+                progress,
+                completedCount,
+                totalCount
+              );
+            }
+            completedCount++;
+          }
+
+          progress.report({ message: "Operation completed!" });
+        }
+      );
+
+      // Invalidate cache and refresh
+      s3Cache.invalidate(targetBucket);
+      for (const sourceItem of sourceData) {
+        s3Cache.invalidate(sourceItem.bucket);
+      }
+      this.refresh();
+
       vscode.window.showInformationMessage(
-        `${action} functionality will be implemented in the copy/move commands`
+        `Moved ${sourceData.length} item${sourceData.length > 1 ? "s" : ""} successfully`
       );
     } catch (error) {
       vscode.window.showErrorMessage(
-        `${action} failed: ${error instanceof Error ? error.message : error}`
+        `Move failed: ${error instanceof Error ? error.message : error}`
       );
+    }
+  }
+
+  private async handleInternalDropFileData(
+    sourceData: { type: "object"; bucket: string; key: string },
+    targetBucket: string,
+    targetPrefix: string,
+    progress: vscode.Progress<{ message?: string; increment?: number }>,
+    completedCount: number,
+    totalCount: number
+  ): Promise<void> {
+    const fileName = getFileName(sourceData.key);
+    const targetKey = targetPrefix
+      ? joinPath(targetPrefix, fileName)
+      : fileName;
+
+    progress.report({
+      message: `Moving ${completedCount + 1}/${totalCount}: ${fileName}`,
+      increment: (1 / totalCount) * 100,
+    });
+
+    await moveObject(
+      sourceData.bucket,
+      sourceData.key,
+      targetBucket,
+      targetKey
+    );
+  }
+
+  private async handleInternalDropFolderData(
+    sourceData: { type: "prefix"; bucket: string; prefix: string },
+    targetBucket: string,
+    targetPrefix: string,
+    progress: vscode.Progress<{ message?: string; increment?: number }>,
+    completedCount: number,
+    totalCount: number
+  ): Promise<void> {
+    const sourceFolderName = sourceData.prefix.endsWith("/")
+      ? sourceData.prefix.slice(0, -1).split("/").pop()
+      : sourceData.prefix.split("/").pop();
+
+    const targetFolderPrefix = targetPrefix
+      ? joinPath(targetPrefix, sourceFolderName!) + "/"
+      : sourceFolderName + "/";
+
+    progress.report({
+      message: `Moving folder ${completedCount + 1}/${totalCount}: ${sourceFolderName}`,
+    });
+
+    // List all objects under the source prefix
+    const objects = await listAllObjectsRecursive(
+      sourceData.bucket,
+      sourceData.prefix
+    );
+
+    if (objects.length === 0) {
+      // Empty folder - just create the target folder marker
+      await createFolder(targetBucket, targetFolderPrefix);
+      await deleteObject(sourceData.bucket, sourceData.prefix);
+    } else {
+      // Process each object
+      for (const obj of objects) {
+        const relativePath = obj.key.substring(sourceData.prefix.length);
+        const targetKey = targetFolderPrefix + relativePath;
+        await moveObject(sourceData.bucket, obj.key, targetBucket, targetKey);
+      }
+
+      // Create target folder marker if it doesn't exist
+      try {
+        await createFolder(targetBucket, targetFolderPrefix);
+      } catch (error) {
+        // Ignore if already exists
+      }
+
+      // Clean up source folder
+      const remainingObjects = await listAllObjectsRecursive(
+        sourceData.bucket,
+        sourceData.prefix
+      );
+
+      // Delete any remaining folder markers (objects ending with /)
+      for (const obj of remainingObjects) {
+        if (obj.key.endsWith("/")) {
+          try {
+            await deleteObject(sourceData.bucket, obj.key);
+          } catch (error) {
+            console.log(`Failed to delete folder marker ${obj.key}:`, error);
+          }
+        }
+      }
+
+      // Delete the main folder marker
+      try {
+        await deleteObject(sourceData.bucket, sourceData.prefix);
+      } catch (error) {
+        console.log("Source folder marker already deleted or doesn't exist");
+      }
     }
   }
 

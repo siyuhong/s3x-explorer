@@ -92,7 +92,9 @@
           "id": "s3xExplorer",
           "name": "S3/R2 Explorer",
           "icon": "$(cloud)",
-          "visibility": "visible"
+          "visibility": "visible",
+          "type": "tree",
+          "dragAndDrop": true
         }
       ]
     },
