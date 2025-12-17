@@ -641,7 +641,9 @@ export class S3Explorer
     }
 
     const uris = uriList.split("\n").filter((uri) => uri.trim());
-    if (uris.length === 0) return;
+    if (uris.length === 0) {
+      return;
+    }
 
     const targetBucket = target.bucket;
     const targetPrefix = isPrefixNode(target) ? target.prefix : "";

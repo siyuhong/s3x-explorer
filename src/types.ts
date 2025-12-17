@@ -50,12 +50,6 @@ export interface ProgressReporter {
   report(value: { message?: string; increment?: number }): void;
 }
 
-export interface BulkOperation {
-  type: "delete" | "copy" | "move";
-  items: TreeNode[];
-  target?: TreeNode;
-}
-
 export interface TreeNode {
   readonly type: "bucket" | "prefix" | "object" | "loadMore";
   readonly bucket: string;

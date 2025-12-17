@@ -630,6 +630,32 @@ async function handlePasteUpload(node: any) {
   }
 }
 
+/**
+ * Helper function to recursively scan directory and collect files
+ */
+async function scanDirectoryForUpload(
+  dirPath: string,
+  relativeTo: string,
+  files: { localPath: string; relativePath: string }[],
+  fs: typeof import("fs")
+): Promise<void> {
+  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    const relativePath = path.relative(relativeTo, fullPath);
+
+    if (entry.isDirectory()) {
+      await scanDirectoryForUpload(fullPath, relativeTo, files, fs);
+    } else if (entry.isFile()) {
+      files.push({
+        localPath: fullPath,
+        relativePath: relativePath.replace(/\\/g, "/"), // Normalize to forward slashes
+      });
+    }
+  }
+}
+
 async function handleUploadFolder(node: any) {
   try {
     let bucket: string;
@@ -661,29 +687,11 @@ async function handleUploadFolder(node: any) {
     const fs = await import("fs");
     const config = getConfig();
 
-    // Recursively collect all files (moved outside withProgress)
+    // Recursively collect all files
     const files: { localPath: string; relativePath: string }[] = [];
 
-    async function scanDirectory(dirPath: string, relativeTo: string) {
-      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-        const relativePath = path.relative(relativeTo, fullPath);
-
-        if (entry.isDirectory()) {
-          await scanDirectory(fullPath, relativeTo);
-        } else if (entry.isFile()) {
-          files.push({
-            localPath: fullPath,
-            relativePath: relativePath.replace(/\\/g, "/"), // Normalize to forward slashes
-          });
-        }
-      }
-    }
-
     // Scan directory first
-    await scanDirectory(folderPath, folderPath);
+    await scanDirectoryForUpload(folderPath, folderPath, files, fs);
 
     if (files.length === 0) {
       showInformationMessage("No files found in the selected folder");

@@ -116,6 +116,7 @@ export async function promptForS3FolderPath(
 
   let currentPrefix = initialPrefix;
 
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       // List folders at current level

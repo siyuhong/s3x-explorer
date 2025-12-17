@@ -253,35 +253,3 @@ export function createLoadMoreNode(
 ): LoadMoreNode {
   return new LoadMoreNode(bucket, continuationToken, prefix);
 }
-
-// Utility to convert tree nodes to simple TreeNode interface
-export function toTreeNode(node: BaseTreeNode): TreeNode {
-  const base: TreeNode = {
-    type: node.type,
-    bucket: node.bucket,
-  };
-
-  if (isPrefixNode(node)) {
-    return { ...base, prefix: node.prefix };
-  }
-
-  if (isObjectNode(node)) {
-    return {
-      ...base,
-      key: node.key,
-      size: node.size,
-      lastModified: node.lastModified,
-      etag: node.etag,
-    };
-  }
-
-  if (isLoadMoreNode(node)) {
-    return {
-      ...base,
-      prefix: node.prefix,
-      continuationToken: node.continuationToken,
-    };
-  }
-
-  return base;
-}
