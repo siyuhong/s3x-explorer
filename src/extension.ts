@@ -120,6 +120,62 @@ export function deactivate() {
   s3Cache.invalidateAll();
 }
 
+async function handleFilterTree() {
+  try {
+    const currentFilter = s3Explorer.getFilterText();
+
+    const filterText = await vscode.window.showInputBox({
+      title: "Filter Tree View",
+      placeHolder: "Enter text to filter (case-insensitive)",
+      prompt: "Search by bucket, folder, or file name",
+      value: currentFilter,
+    });
+
+    if (filterText === undefined) {
+      return; // User cancelled
+    }
+
+    if (filterText === "") {
+      // Empty string means clear filter
+      s3Explorer.clearFilter();
+      await vscode.commands.executeCommand(
+        "setContext",
+        "s3x.filterActive",
+        false
+      );
+      showInformationMessage("Filter cleared");
+    } else {
+      s3Explorer.setFilter(filterText);
+      await vscode.commands.executeCommand(
+        "setContext",
+        "s3x.filterActive",
+        true
+      );
+      showInformationMessage(`Filtering tree by: "${filterText}"`);
+    }
+  } catch (error) {
+    showErrorMessage(
+      `Failed to filter tree: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+async function handleClearFilter() {
+  try {
+    s3Explorer.clearFilter();
+    await vscode.commands.executeCommand(
+      "setContext",
+      "s3x.filterActive",
+      false
+    );
+    showInformationMessage("Filter cleared");
+  } catch (error) {
+    showErrorMessage(
+      `Failed to clear filter: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
 function registerCommands(context: vscode.ExtensionContext) {
   // Core commands
   context.subscriptions.push(
@@ -172,6 +228,18 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.pasteUpload", async (node) => {
       await handlePasteUpload(node);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.filterTree", async () => {
+      await handleFilterTree();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("s3x.clearFilter", async () => {
+      await handleClearFilter();
     })
   );
 
@@ -1466,19 +1534,61 @@ async function handleSearch() {
           detail: `${obj.size ? `${Math.round(obj.size / 1024)} KB` : ""} ${
             obj.lastModified ? obj.lastModified.toLocaleDateString() : ""
           }`.trim(),
+          key: obj.key,
         }));
 
         const selected = await vscode.window.showQuickPick(quickPickItems, {
-          placeHolder: `Found ${results.length} objects. Select one to open.`,
+          placeHolder: `Found ${results.length} objects. Select one to reveal in tree or open.`,
           matchOnDescription: true,
           matchOnDetail: true,
         });
 
         if (selected) {
-          const uri = vscode.Uri.parse(
-            `s3x://${bucket}/${selected.description}`
+          // Show action menu
+          const action = await vscode.window.showQuickPick(
+            [
+              {
+                label: "$(eye) Reveal in Tree",
+                description: "Show the file in the S3 Explorer tree view",
+                value: "reveal",
+              },
+              {
+                label: "$(file) Open File",
+                description: "Open the file in the editor",
+                value: "open",
+              },
+            ],
+            {
+              placeHolder: `Selected: ${selected.label}`,
+            }
           );
-          await vscode.commands.executeCommand("vscode.open", uri);
+
+          if (!action) {
+            return;
+          }
+
+          if (action.value === "reveal") {
+            // Find and reveal the node in tree
+            progress.report({ message: "Locating file in tree..." });
+            const node = await s3Explorer.findNode(bucket, selected.key);
+
+            if (node) {
+              await s3TreeView.reveal(node, {
+                select: true,
+                focus: true,
+                expand: true,
+              });
+              showInformationMessage(`Revealed "${selected.label}" in tree`);
+            } else {
+              showErrorMessage(
+                `Could not locate "${selected.label}" in tree. Try refreshing the explorer.`
+              );
+            }
+          } else if (action.value === "open") {
+            // Open the file
+            const uri = vscode.Uri.parse(`s3x://${bucket}/${selected.key}`);
+            await vscode.commands.executeCommand("vscode.open", uri);
+          }
         }
       }
     );

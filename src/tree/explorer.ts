@@ -38,7 +38,184 @@ export class S3Explorer
   dropMimeTypes = ["application/vnd.code.tree.s3xExplorer", "files", "text/uri-list"];
   dragMimeTypes = ["text/uri-list", "application/vnd.code.tree.s3xExplorer"];
 
+  // Filter state
+  private filterText: string = "";
+  private filterActive: boolean = false;
+
   constructor() {}
+
+  // Filter methods
+  setFilter(filterText: string): void {
+    this.filterText = filterText.toLowerCase();
+    this.filterActive = filterText.length > 0;
+    this.refresh();
+  }
+
+  clearFilter(): void {
+    this.filterText = "";
+    this.filterActive = false;
+    this.refresh();
+  }
+
+  getFilterText(): string {
+    return this.filterText;
+  }
+
+  isFilterActive(): boolean {
+    return this.filterActive;
+  }
+
+  fuzzyMatch(pattern: string, text: string): boolean {
+  if (!pattern) {
+    return true; // Empty pattern matches everything
+  }
+
+  return text.toLowerCase().includes(pattern.toLowerCase());
+}
+
+  private matchesFilter(node: BaseTreeNode): boolean {
+    if (!this.filterActive) {
+      return true;
+    }
+
+    // Match bucket name (case-insensitive substring match)
+    if (isBucketNode(node)) {
+      return this.fuzzyMatch(this.filterText, node.bucket);
+    }
+
+    // Match prefix (folder) name (case-insensitive substring match)
+    if (isPrefixNode(node)) {
+      // Match against full path
+      return this.fuzzyMatch(this.filterText, node.prefix);
+    }
+
+    // Match object key (case-insensitive substring match)
+    if (isObjectNode(node)) {
+      // Match against full key
+      return this.fuzzyMatch(this.filterText, node.key);
+    }
+
+    // Always show "Load More" nodes
+    if (isLoadMoreNode(node)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Check if a bucket contains any matching items
+  private async bucketHasMatches(bucket: string): Promise<boolean> {
+    try {
+      const result = await listObjects(bucket, undefined, undefined, 1000);
+
+      // Check prefixes (folders) - recursively check their contents
+      for (const prefixItem of result.prefixes) {
+        const node = createPrefixNode(bucket, prefixItem, undefined);
+        if (this.matchesFilter(node)) {
+          return true;
+        }
+
+        // Recursively check if folder contains matches
+        const folderHasMatches = await this.prefixHasMatches(bucket, prefixItem.prefix);
+        if (folderHasMatches) {
+          return true;
+        }
+      }
+
+      // Check objects
+      for (const object of result.objects) {
+        const node = createObjectNode(bucket, object, undefined);
+        if (this.matchesFilter(node)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`Error checking bucket ${bucket} for matches:`, error);
+      return false;
+    }
+  }
+
+  // Filter children and include parent folders if they contain matching items
+  private async filterChildren(
+    nodes: BaseTreeNode[],
+    bucket: string,
+    prefix?: string
+  ): Promise<BaseTreeNode[]> {
+    if (!this.filterActive) {
+      return nodes;
+    }
+
+    const filteredNodes: BaseTreeNode[] = [];
+
+    for (const node of nodes) {
+      // Always include matching objects
+      if (isObjectNode(node) && this.matchesFilter(node)) {
+        filteredNodes.push(node);
+        continue;
+      }
+
+      // For folders, check if they or their children match
+      if (isPrefixNode(node)) {
+        // Check if folder name itself matches
+        if (this.matchesFilter(node)) {
+          filteredNodes.push(node);
+          continue;
+        }
+
+        // Check if folder contains matching items
+        const hasMatches = await this.prefixHasMatches(bucket, node.prefix);
+        if (hasMatches) {
+          filteredNodes.push(node);
+        }
+      }
+
+      // Always include Load More nodes
+      if (isLoadMoreNode(node)) {
+        filteredNodes.push(node);
+      }
+    }
+
+    return filteredNodes;
+  }
+
+  // Check if a prefix (folder) contains any matching items recursively
+  private async prefixHasMatches(
+    bucket: string,
+    prefix: string
+  ): Promise<boolean> {
+    try {
+      const result = await listObjects(bucket, prefix, undefined, 1000);
+
+      // Check prefixes (subfolders) - recursively check their contents
+      for (const prefixItem of result.prefixes) {
+        const node = createPrefixNode(bucket, prefixItem, prefix);
+        if (this.matchesFilter(node)) {
+          return true;
+        }
+
+        // Recursively check if subfolder contains matches
+        const subfolderHasMatches = await this.prefixHasMatches(bucket, prefixItem.prefix);
+        if (subfolderHasMatches) {
+          return true;
+        }
+      }
+
+      // Check objects
+      for (const object of result.objects) {
+        const node = createObjectNode(bucket, object, prefix);
+        if (this.matchesFilter(node)) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`Error checking prefix ${prefix} for matches:`, error);
+      return false;
+    }
+  }
 
   refresh(element?: BaseTreeNode): void {
     if (element) {
@@ -64,17 +241,33 @@ export class S3Explorer
     try {
       if (!element) {
         // Root level - show buckets
-        return await this.getBuckets();
+        const buckets = await this.getBuckets();
+
+        // If filter is active, only show buckets that contain matching items
+        if (this.filterActive) {
+          const filteredBuckets: BucketNode[] = [];
+          for (const bucket of buckets) {
+            const hasMatches = await this.bucketHasMatches(bucket.bucket);
+            if (hasMatches) {
+              filteredBuckets.push(bucket);
+            }
+          }
+          return filteredBuckets;
+        }
+
+        return buckets;
       }
 
       if (isBucketNode(element)) {
         // Show contents of bucket (root level)
-        return await this.getBucketContents(element.bucket);
+        const contents = await this.getBucketContents(element.bucket);
+        return this.filterChildren(contents, element.bucket);
       }
 
       if (isPrefixNode(element)) {
         // Show contents of prefix
-        return await this.getPrefixContents(element.bucket, element.prefix);
+        const contents = await this.getPrefixContents(element.bucket, element.prefix);
+        return this.filterChildren(contents, element.bucket, element.prefix);
       }
 
       if (isLoadMoreNode(element)) {
@@ -230,14 +423,18 @@ export class S3Explorer
   ): BaseTreeNode[] {
     const nodes: BaseTreeNode[] = [];
 
-    // Add prefix nodes (folders)
+    // Add prefix nodes (folders) - always add all folders when not filtering
+    // When filtering, folders are handled by filterChildren
     for (const prefixItem of result.prefixes) {
       nodes.push(createPrefixNode(bucket, prefixItem, prefix));
     }
 
-    // Add object nodes (files)
+    // Add object nodes (files) - filter only objects
     for (const object of result.objects) {
-      nodes.push(createObjectNode(bucket, object, prefix));
+      const node = createObjectNode(bucket, object, prefix);
+      if (!this.filterActive || this.matchesFilter(node)) {
+        nodes.push(node);
+      }
     }
 
     // Add "Load more" node if there are more results
@@ -255,14 +452,18 @@ export class S3Explorer
   ): BaseTreeNode[] {
     const nodes: BaseTreeNode[] = [];
 
-    // Add prefix nodes (folders)
+    // Add prefix nodes (folders) - always add all folders when not filtering
+    // When filtering, folders are handled by filterChildren
     for (const prefixItem of cached.prefixes) {
       nodes.push(createPrefixNode(bucket, prefixItem, prefix));
     }
 
-    // Add object nodes (files)
+    // Add object nodes (files) - filter only objects
     for (const object of cached.objects) {
-      nodes.push(createObjectNode(bucket, object, prefix));
+      const node = createObjectNode(bucket, object, prefix);
+      if (!this.filterActive || this.matchesFilter(node)) {
+        nodes.push(node);
+      }
     }
 
     // Add "Load more" node if there are more results
@@ -492,13 +693,155 @@ export class S3Explorer
     key?: string
   ): Promise<BaseTreeNode | undefined> {
     if (!key) {
-      // Looking for bucket
+      // Looking for bucket node
       const buckets = await this.getBuckets();
       return buckets.find((b) => b.bucket === bucket);
     }
 
-    // TODO: Implement path-based node finding
-    // This would involve traversing the tree structure
+    // Check if key represents a folder (prefix) or an object
+    const isFolder = key.endsWith("/");
+
+    // Split the key into path segments
+    const segments = key.split("/").filter((s) => s.length > 0);
+
+    if (segments.length === 0) {
+      // Empty key, return bucket node
+      const buckets = await this.getBuckets();
+      return buckets.find((b) => b.bucket === bucket);
+    }
+
+    // Traverse the tree level by level
+    let currentPrefix = "";
+    let currentNodes: BaseTreeNode[] = await this.getBucketContents(bucket);
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const isLastSegment = i === segments.length - 1;
+
+      if (isLastSegment && !isFolder) {
+        // Looking for an object (file)
+        const objectKey = key;
+        const objectNode = currentNodes.find(
+          (n) => isObjectNode(n) && n.key === objectKey
+        );
+
+        if (objectNode) {
+          return objectNode;
+        }
+
+        // Object not found in current page, check if there's more data
+        // Load all pages until we find it or run out of pages
+        let hasMore = currentNodes.some(isLoadMoreNode);
+        while (hasMore && !objectNode) {
+          const loadMoreNode = currentNodes.find(isLoadMoreNode) as LoadMoreNode;
+          if (loadMoreNode) {
+            // Load more items
+            if (currentPrefix) {
+              await this.getPrefixContents(
+                bucket,
+                currentPrefix,
+                loadMoreNode.continuationToken
+              );
+            } else {
+              await this.getBucketContents(
+                bucket,
+                loadMoreNode.continuationToken
+              );
+            }
+
+            // Get updated nodes
+            currentNodes = currentPrefix
+              ? await this.getPrefixContents(bucket, currentPrefix)
+              : await this.getBucketContents(bucket);
+
+            // Check again for the object
+            const found = currentNodes.find(
+              (n) => isObjectNode(n) && n.key === objectKey
+            );
+            if (found) {
+              return found;
+            }
+
+            hasMore = currentNodes.some(isLoadMoreNode);
+          } else {
+            hasMore = false;
+          }
+        }
+
+        return undefined;
+      } else {
+        // Looking for a folder (prefix)
+        currentPrefix = currentPrefix
+          ? `${currentPrefix}${segment}/`
+          : `${segment}/`;
+
+        const prefixNode = currentNodes.find(
+          (n) => isPrefixNode(n) && n.prefix === currentPrefix
+        );
+
+        if (!prefixNode) {
+          // Prefix not found in current page, check if there's more data
+          let hasMore = currentNodes.some(isLoadMoreNode);
+          while (hasMore) {
+            const loadMoreNode = currentNodes.find(
+              isLoadMoreNode
+            ) as LoadMoreNode;
+            if (loadMoreNode) {
+              // Load more items
+              const parentPrefix =
+                currentPrefix.split("/").slice(0, -2).join("/") +
+                (currentPrefix.split("/").slice(0, -2).length > 0 ? "/" : "");
+
+              if (parentPrefix) {
+                await this.getPrefixContents(
+                  bucket,
+                  parentPrefix,
+                  loadMoreNode.continuationToken
+                );
+              } else {
+                await this.getBucketContents(
+                  bucket,
+                  loadMoreNode.continuationToken
+                );
+              }
+
+              // Get updated nodes
+              currentNodes = parentPrefix
+                ? await this.getPrefixContents(bucket, parentPrefix)
+                : await this.getBucketContents(bucket);
+
+              // Check again for the prefix
+              const found = currentNodes.find(
+                (n) => isPrefixNode(n) && n.prefix === currentPrefix
+              );
+              if (found) {
+                if (isLastSegment) {
+                  return found;
+                }
+                // Continue to next level
+                currentNodes = await this.getPrefixContents(bucket, currentPrefix);
+                break;
+              }
+
+              hasMore = currentNodes.some(isLoadMoreNode);
+            } else {
+              hasMore = false;
+            }
+          }
+
+          if (!prefixNode) {
+            return undefined;
+          }
+        } else {
+          if (isLastSegment) {
+            return prefixNode;
+          }
+          // Get children of this prefix and continue
+          currentNodes = await this.getPrefixContents(bucket, currentPrefix);
+        }
+      }
+    }
+
     return undefined;
   }
 }

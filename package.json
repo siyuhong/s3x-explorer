@@ -178,6 +178,16 @@
         "icon": "$(search)"
       },
       {
+        "command": "s3x.filterTree",
+        "title": "Filter Tree View",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "s3x.clearFilter",
+        "title": "Clear Filter",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "s3x.showMetadata",
         "title": "Show Object Metadata",
         "icon": "$(info)"
@@ -226,9 +236,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "s3x.configure",
+          "command": "s3x.filterTree",
           "when": "view == s3xExplorer",
           "group": "navigation@2"
+        },
+        {
+          "command": "s3x.clearFilter",
+          "when": "view == s3xExplorer && s3x.filterActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "s3x.configure",
+          "when": "view == s3xExplorer",
+          "group": "navigation@4"
         },
         {
           "command": "s3x.search",
@@ -350,6 +370,17 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "s3x.filterTree",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "focusedView == s3xExplorer"
+      },
+      {
+        "command": "s3x.clearFilter",
+        "key": "escape",
+        "when": "focusedView == s3xExplorer && s3x.filterActive"
+      },
       {
         "command": "s3x.pasteUpload",
         "key": "ctrl+v",
