@@ -194,33 +194,6 @@ export async function listAllObjectsRecursive(
   });
 }
 
-export async function searchObjects(
-  bucket: string,
-  searchPrefix?: string,
-  contains?: string,
-  maxResults: number = 1000
-): Promise<S3Object[]> {
-  let allObjects: S3Object[];
-
-  if (searchPrefix) {
-    // Use server-side prefix filtering with recursive listing
-    allObjects = await listAllObjectsRecursive(bucket, searchPrefix, maxResults);
-  } else {
-    // Get all objects in bucket (up to maxResults) with recursive listing
-    allObjects = await listAllObjectsRecursive(bucket, undefined, maxResults);
-  }
-
-  // Apply client-side "contains" filter if specified
-  if (contains) {
-    const lowerContains = contains.toLowerCase();
-    allObjects = allObjects.filter((obj) =>
-      obj.key.toLowerCase().includes(lowerContains)
-    );
-  }
-
-  return allObjects;
-}
-
 export function getObjectDisplayName(key: string, prefix?: string): string {
   if (prefix && key.startsWith(prefix)) {
     return key.substring(prefix.length);

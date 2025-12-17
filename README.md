@@ -188,8 +188,6 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 - **Tree Filtering** - Press **Ctrl/Cmd+F** to filter the tree view in real-time
   - Fuzzy matching across bucket names, folder paths, and file names
   - Press **Escape** to clear the filter
-- **Bucket Search** - Command Palette → "S3: Search in Bucket"
-  - Choose **prefix search** (server-side, faster) or **contains search** (client-side)
 
 ### Advanced Features
 
@@ -288,7 +286,6 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 | `S3: S3/R2 Setup Wizard`       | Step-by-step setup wizard            |            |
 | `S3: Filter Tree View`         | Filter tree by name (fuzzy match)    | Ctrl/Cmd+F |
 | `S3: Clear Filter`             | Clear active tree filter             | Escape     |
-| `S3: Search in Bucket`         | Search objects by prefix/content     |            |
 | `S3: Refresh`                  | Refresh tree view                    |            |
 | `S3: Force Refresh All`        | Clear cache and refresh all          |            |
 | `S3: Run Smoke Test`           | Test connection and basic operations |            |

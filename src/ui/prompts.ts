@@ -237,63 +237,6 @@ export async function promptForFileName(
   return input;
 }
 
-export async function promptForSearchTerm(
-  bucket?: string,
-  placeholder?: string
-): Promise<{ prefix?: string; contains?: string } | undefined> {
-  const bucketName =
-    bucket || (await promptForBucket("Select bucket to search"));
-  if (!bucketName) {
-    return undefined;
-  }
-
-  const searchType = await vscode.window.showQuickPick(
-    [
-      {
-        label: "Prefix Search",
-        description: "Search by object key prefix (server-side, faster)",
-        value: "prefix",
-      },
-      {
-        label: "Contains Search",
-        description: "Search for keys containing text (client-side)",
-        value: "contains",
-      },
-    ],
-    {
-      placeHolder: "Choose search type",
-    }
-  );
-
-  if (!searchType) {
-    return undefined;
-  }
-
-  const searchTerm = await vscode.window.showInputBox({
-    title:
-      searchType.value === "prefix" ? "Search by Prefix" : "Search for Text",
-    placeHolder:
-      placeholder ||
-      (searchType.value === "prefix"
-        ? "Enter prefix (e.g., folder/subfolder/)"
-        : "Enter text to search for in object names"),
-    validateInput: (value) => {
-      if (!value || value.trim().length === 0) {
-        return "Search term cannot be empty";
-      }
-      return undefined;
-    },
-  });
-
-  if (!searchTerm) {
-    return undefined;
-  }
-
-  return searchType.value === "prefix"
-    ? { prefix: searchTerm }
-    : { contains: searchTerm };
-}
-
 export async function promptForPresignedUrlExpiry(): Promise<
   number | undefined
 > {

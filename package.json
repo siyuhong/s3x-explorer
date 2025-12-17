@@ -175,11 +175,6 @@
         "icon": "$(globe)"
       },
       {
-        "command": "s3x.search",
-        "title": "Search in Bucket",
-        "icon": "$(search)"
-      },
-      {
         "command": "s3x.filterTree",
         "title": "Filter Tree View",
         "icon": "$(filter)"
@@ -251,11 +246,6 @@
           "command": "s3x.configure",
           "when": "view == s3xExplorer",
           "group": "navigation@4"
-        },
-        {
-          "command": "s3x.search",
-          "when": "view == s3xExplorer",
-          "group": "1_search"
         },
         {
           "command": "s3x.smokeTest",
@@ -351,10 +341,6 @@
         }
       ],
       "commandPalette": [
-        {
-          "command": "s3x.search",
-          "when": "config.s3x.endpointUrl != ''"
-        },
         {
           "command": "s3x.configure"
         },

@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { S3Explorer } from "./tree/explorer";
 import { S3FileSystemProvider } from "./fs/provider";
-import { listBuckets, searchObjects, listAllObjectsRecursive } from "./s3/listing";
+import { listBuckets, listAllObjectsRecursive } from "./s3/listing";
 import {
   createFolder,
   uploadFile,
@@ -35,7 +35,6 @@ import {
 import {
   promptForBucket,
   promptForFolderName,
-  promptForSearchTerm,
   promptForPresignedUrlExpiry,
   promptForDestructiveConfirmation,
   promptForMoveOrCopy,
@@ -301,12 +300,6 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.publicUrl", async (node) => {
       await handleGeneratePublicUrl(node);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("s3x.search", async () => {
-      await handleSearch();
     })
   );
 
@@ -1501,112 +1494,6 @@ async function handleGeneratePublicUrl(node: any) {
   }
 }
 
-async function handleSearch() {
-  try {
-    const searchParams = await promptForSearchTerm();
-    if (!searchParams) {
-      return;
-    }
-
-    const bucket = await promptForBucket("Select bucket to search");
-    if (!bucket) {
-      return;
-    }
-
-    await withProgress(
-      {
-        title: "Searching objects",
-        location: vscode.ProgressLocation.Notification,
-      },
-      async (progress) => {
-        progress.report({ message: "Searching..." });
-
-        const results = await searchObjects(
-          bucket,
-          searchParams.prefix,
-          searchParams.contains,
-          1000
-        );
-
-        if (results.length === 0) {
-          showInformationMessage(
-            "No objects found matching the search criteria"
-          );
-          return;
-        }
-
-        // Show results in a quick pick
-        const quickPickItems = results.map((obj) => ({
-          label: getFileName(obj.key),
-          description: obj.key,
-          detail: `${obj.size ? `${Math.round(obj.size / 1024)} KB` : ""} ${
-            obj.lastModified ? obj.lastModified.toLocaleDateString() : ""
-          }`.trim(),
-          key: obj.key,
-        }));
-
-        const selected = await vscode.window.showQuickPick(quickPickItems, {
-          placeHolder: `Found ${results.length} objects. Select one to reveal in tree or open.`,
-          matchOnDescription: true,
-          matchOnDetail: true,
-        });
-
-        if (selected) {
-          // Show action menu
-          const action = await vscode.window.showQuickPick(
-            [
-              {
-                label: "$(eye) Reveal in Tree",
-                description: "Show the file in the S3 Explorer tree view",
-                value: "reveal",
-              },
-              {
-                label: "$(file) Open File",
-                description: "Open the file in the editor",
-                value: "open",
-              },
-            ],
-            {
-              placeHolder: `Selected: ${selected.label}`,
-            }
-          );
-
-          if (!action) {
-            return;
-          }
-
-          if (action.value === "reveal") {
-            // Find and reveal the node in tree
-            progress.report({ message: "Locating file in tree..." });
-            const node = await s3Explorer.findNode(bucket, selected.key);
-
-            if (node) {
-              await s3TreeView.reveal(node, {
-                select: true,
-                focus: true,
-                expand: true,
-              });
-              showInformationMessage(`Revealed "${selected.label}" in tree`);
-            } else {
-              showErrorMessage(
-                `Could not locate "${selected.label}" in tree. Try refreshing the explorer.`
-              );
-            }
-          } else if (action.value === "open") {
-            // Open the file
-            const uri = vscode.Uri.parse(`s3x://${bucket}/${selected.key}`);
-            await vscode.commands.executeCommand("vscode.open", uri);
-          }
-        }
-      }
-    );
-  } catch (error) {
-    showErrorMessage(
-      `Search failed: ${error instanceof Error ? error.message : error}`
-    );
-  }
-}
-
 async function handleShowMetadata(node: any) {
   try {
     if (!isObjectNode(node)) {
@@ -1689,9 +1576,8 @@ async function handleSmokeTest() {
         });
 
         // List first 10 objects in the first bucket
-        const result = await searchObjects(
+        const result = await listAllObjectsRecursive(
           testBucket,
-          undefined,
           undefined,
           10
         );

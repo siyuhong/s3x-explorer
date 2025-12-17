@@ -5,7 +5,8 @@
       "Bash(npm run lint)",
       "Bash(npm run test:unit:*)",
       "mcp__filesystem-with-morph__edit_file",
-      "Bash(code:*)"
+      "Bash(code:*)",
+      "mcp__filesystem-with-morph__warpgrep_codebase_search"
     ],
     "deny": [],
     "ask": []
