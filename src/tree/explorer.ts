@@ -614,7 +614,7 @@ export class S3Explorer
       for (const file of files) {
         try {
           const uri = file.uri;
-          if (uri.scheme === "file") {
+          if (uri && uri.scheme === "file") {
             const filePath = uri.fsPath;
             const originalFileName = path.basename(filePath);
             const config = getConfig();
@@ -831,7 +831,7 @@ export class S3Explorer
       for (const uriStr of uris) {
         try {
           const uri = vscode.Uri.parse(uriStr);
-          if (uri.scheme === "file") {
+          if (uri && uri.scheme === "file") {
             const filePath = uri.fsPath;
             const originalFileName = path.basename(filePath);
             const config = getConfig();

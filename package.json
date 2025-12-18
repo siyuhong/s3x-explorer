@@ -79,10 +79,10 @@
           "default": "${fileName}${extName}",
           "description": "Template for uploaded file names.\n\nVariables: \n - ${fileName} (name without extension)\n - ${extName} (extension with dot)\n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS).\nExamples:\n${fileName}-${date}${extName} → photo-2025-12-14.jpg"
         },
-        "s3x.pasteImageFileNameTemplate": {
+        "s3x.pasteFileNameTemplate": {
           "type": "string",
-          "default": "image-${dateTime}.png",
-          "description": "Template for pasted image file names.\n\nVariables: \n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS)\n - ${timestamp} (Unix timestamp).\nExamples:\nscreenshot-${dateTime}.png → screenshot-2025-12-14-15-30-45.png"
+          "default": "image-${dateTime}.${ext}",
+          "description": "Template for pasted file names (from clipboard).\n\nVariables: \n - ${date} (YYYY-MM-DD)\n - ${dateTime} (YYYY-MM-DD-HH-MM-SS)\n - ${timestamp} (Unix timestamp)\n - ${ext} (auto-detected file extension: png, jpg, gif, bmp, tiff, etc.).\nExamples:\nfile-${dateTime}.${ext} → file-2025-12-14-15-30-45.jpg"
         }
       }
     },

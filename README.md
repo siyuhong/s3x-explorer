@@ -6,7 +6,7 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 
 - 📁 **Tree View** - Browse buckets and objects like a local file system
 - ✏️ **Inline Editing** - Open and edit S3 objects directly in VS Code
-- 📋 **Paste Upload** - Copy images and paste with Ctrl/Cmd+V
+- 📋 **Paste Upload** - Copy any files and paste with Ctrl/Cmd+V (supports images, documents, videos, etc.)
 - 🔗 **URL Generation** - Presigned URLs and public URLs with custom domains
 - 🎨 **Media Preview** - Built-in viewer for images, videos, and audio
 - ⚡ **Smart Upload** - Template-based file naming with drag & drop support
@@ -33,7 +33,11 @@ A powerful VS Code extension for browsing and managing S3-compatible storage, sp
 ### 🔄 File Operations
 
 - **Upload**: Drag & drop files or use context menu
-- **Paste Upload**: Copy images to clipboard and paste directly
+- **Paste Upload**: Copy any files (images, PDFs, videos, documents) and paste directly with Ctrl/Cmd+V
+  - Supports all file formats from file manager
+  - Auto-detects image formats (PNG, JPEG, GIF, TIFF, BMP) from screenshots
+  - Batch upload multiple files at once
+  - Smart file naming with templates
 - **Download**: Save objects to local filesystem
 - **Drag & Drop Move**: Drag files/folders within tree to move between locations
 - **CRUD Operations**: Create folders, rename, delete, copy, cut, paste, move
@@ -97,8 +101,8 @@ Open VS Code settings (`Ctrl/Cmd + ,`) and configure:
   // Optional: Template for uploaded file names (default: ${fileName}${extName})
   "s3x.uploadFileNameTemplate": "${fileName}-${date}${extName}",
 
-  // Optional: Template for pasted image file names (default: image-${dateTime}.png)
-  "s3x.pasteImageFileNameTemplate": "screenshot-${dateTime}.png"
+  // Optional: Template for pasted image file names (default: image-${dateTime}.${ext})
+  "s3x.pasteFileNameTemplate": "screenshot-${dateTime}.${ext}"
 }
 ```
 
@@ -163,8 +167,11 @@ https://<account-id>.<jurisdiction>.r2.cloudflarestorage.com
 
 - **Right-click** bucket/folder → "Upload File" or "Upload Folder"
 - **Drag & drop** files from your file system into the tree
-- **Paste images** - Copy image to clipboard, focus tree, press Ctrl+V
-- **Progress tracking** shows upload status
+- **Paste upload** - Copy any files to clipboard, focus tree, press Ctrl/Cmd+V
+  - **From file manager**: Copy files (any format) → Paste upload
+  - **From screenshots**: Take screenshot → Paste upload (auto-detects format)
+  - **Multiple files**: Select and copy multiple files → Batch paste upload
+- **Progress tracking** shows upload status for each file
 
 #### Moving Files/Folders
 
@@ -223,33 +230,91 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 
 #### Paste Upload
 
-**Quick image upload from clipboard** - perfect for screenshots and quick sharing:
+**Quick file upload from clipboard** - perfect for screenshots, documents, and quick sharing:
 
-1. Copy an image to clipboard (screenshot, copied image, etc.)
-2. Focus on S3/R2 Explorer tree view
-3. Press **Ctrl+V** (Windows/Linux) or **Cmd+V** (macOS)
-4. Select destination bucket or folder
-5. Image automatically uploaded with configured naming template
+##### Supported Content Types
 
-**Configure paste image naming** with `s3x.pasteImageFileNameTemplate`:
+1. **File Objects** (Highest Priority) - Any file format
+   - Copy files from file manager (Windows Explorer, Finder, etc.)
+   - Supports: PDF, DOCX, XLSX, ZIP, MP4, MP3, images, code files, etc.
+   - Batch upload: Select and copy multiple files at once
+   - Preserves original file names and extensions
+
+2. **Image Data** - Auto-detected formats
+   - Screenshots (Win+Shift+S, Cmd+Shift+4)
+   - Copied images from browsers or image editors
+   - Formats: PNG, JPEG, GIF, TIFF, BMP
+   - Auto-detects and preserves original format
+
+3. **File Paths** - Text containing valid file paths
+   - Copy file path from address bar or terminal
+   - Automatically detects and uploads the file
+
+4. **Text Content** - Plain text
+   - Prompts for filename
+   - Saves as text file
+
+##### How to Use
+
+**Method 1: Copy Files from File Manager (Recommended)**
+```
+1. Select one or more files in Windows Explorer/Finder
+2. Press Ctrl+C (Windows) or Cmd+C (macOS)
+3. Focus S3/R2 Explorer tree view
+4. Right-click destination folder → "Paste Upload"
+   OR press Ctrl+V / Cmd+V
+5. All files uploaded with original names
+```
+
+**Method 2: Screenshot Upload**
+```
+1. Take screenshot (Win+Shift+S or Cmd+Shift+4)
+2. Focus S3/R2 Explorer tree view
+3. Right-click destination folder → "Paste Upload"
+   OR press Ctrl+V / Cmd+V
+4. Image uploaded with auto-detected format (e.g., screenshot-2025-12-18-15-30-45.jpg)
+```
+
+**Method 3: Copy File Path**
+```
+1. Copy file path to clipboard
+2. Focus S3/R2 Explorer tree view
+3. Right-click destination folder → "Paste Upload"
+4. File uploaded from the path
+```
+
+##### Configure Paste Image Naming
+
+For screenshots and image data, configure `s3x.pasteFileNameTemplate`:
 
 **Available Variables:**
 
 - `${date}` - Current date in YYYY-MM-DD format
 - `${dateTime}` - Current date and time in YYYY-MM-DD-HH-MM-SS format
 - `${timestamp}` - Unix timestamp (e.g., `1702567890`)
+- `${ext}` - Auto-detected file extension (png, jpg, gif, bmp, tiff)
 
 **Examples:**
 
-- `image-${dateTime}.png` → `image-2025-12-14-15-30-45.png` (default)
-- `screenshot-${date}.png` → `screenshot-2025-12-14.png`
-- `${timestamp}.png` → `1702567890.png`
-- `screenshots/${dateTime}.png` → `screenshots/2025-12-14-15-30-45.png`
+- `image-${dateTime}.${ext}` → `image-2025-12-18-15-30-45.jpg` (default)
+- `screenshot-${date}.${ext}` → `screenshot-2025-12-18.png`
+- `${timestamp}.${ext}` → `1702567890.gif`
+- `screenshots/${dateTime}.${ext}` → `screenshots/2025-12-18-15-30-45.png`
 
-**Keyboard Shortcuts:**
+##### Keyboard Shortcuts
 
 - **Ctrl+V** / **Cmd+V** - Paste upload when tree view is focused
 - **Ctrl+Shift+V** / **Cmd+Shift+V** - Alternative paste upload shortcut
+
+##### Platform Support
+
+| Platform | File Objects | Image Data | File Paths | Text |
+|----------|--------------|------------|------------|------|
+| Windows  | ✅           | ✅         | ✅         | ✅   |
+| macOS    | ✅           | ✅         | ✅         | ✅   |
+| Linux    | ⚠️           | ⚠️         | ✅         | ✅   |
+
+⚠️ Linux: File objects and image data detection not yet supported. Use file paths or drag & drop instead.
 
 #### Object Metadata
 
@@ -274,7 +339,7 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 | `s3x.customDomain`               | Custom domain for public URLs    | `""`                      | ❌          |
 | `s3x.includeBucketInPublicUrl`   | Include bucket in public URLs    | `true`                    | ❌          |
 | `s3x.uploadFileNameTemplate`     | Template for uploaded file names | `"${fileName}${extName}"` | ❌          |
-| `s3x.pasteImageFileNameTemplate` | Template for pasted image names  | `"image-${dateTime}.png"` | ❌          |
+| `s3x.pasteFileNameTemplate` | Template for pasted image names  | `"image-${dateTime}.${ext}"` | ❌          |
 
 ⚠️ **Note**: R2 works with any region, but `us-east-1` is recommended.
 
@@ -305,7 +370,10 @@ Configure `s3x.uploadFileNameTemplate` to automatically rename files during uplo
 - **New Folder** - Create a new folder/prefix
 - **Upload File** - Upload single or multiple files (with template-based naming)
 - **Upload Folder** - Upload entire directory (recursive)
-- **Paste Upload** - Upload image from clipboard (Ctrl/Cmd+V)
+- **Paste Upload** - Upload any files from clipboard (Ctrl/Cmd+V)
+  - Supports all file formats from file manager
+  - Auto-detects image formats from screenshots
+  - Batch upload multiple files
 - **Download** - Download object to local file
 - **Rename** - Rename object or folder
 - **Copy** - Copy object to clipboard for later paste

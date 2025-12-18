@@ -70,9 +70,219 @@ interface ClipboardItem {
 
 let clipboard: ClipboardItem | undefined;
 
-export async function activate(context: vscode.ExtensionContext) {
-  console.log("S3/R2 Explorer is activating...");
+// Helper function to detect files in clipboard
+async function detectClipboardFiles(
+  execAsync: (cmd: string) => Promise<{ stdout: string; stderr: string }>,
+  fs: typeof import("fs")
+): Promise<string[]> {
+  const files: string[] = [];
 
+  try {
+    if (process.platform === "darwin") {
+      // macOS: Try to get file paths from clipboard
+      try {
+        const { stdout } = await execAsync(
+          `osascript -e 'set theFiles to the clipboard as «class furl»' ` +
+          `-e 'set fileList to ""' ` +
+          `-e 'repeat with aFile in theFiles' ` +
+          `-e 'set fileList to fileList & POSIX path of aFile & linefeed' ` +
+          `-e 'end repeat' ` +
+          `-e 'return fileList'`
+        );
+
+        const filePaths = stdout.trim().split('\n').filter(p => p.trim());
+        for (const filePath of filePaths) {
+          if (fs.existsSync(filePath)) {
+            const stat = await fs.promises.stat(filePath);
+            if (stat.isFile()) {
+              files.push(filePath);
+            }
+          }
+        }
+      } catch (err) {
+        // No files in clipboard
+      }
+    } else if (process.platform === "win32") {
+      // Windows: Use PowerShell to get file drop list
+      try {
+        // Use buffer to handle encoding properly
+        const { stdout } = await execAsync(
+          `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; ` +
+          `$files = [System.Windows.Forms.Clipboard]::GetFileDropList(); ` +
+          `if ($files -and $files.Count -gt 0) { ` +
+          `$files | ForEach-Object { [Console]::WriteLine($_.ToString()) } }"`
+        );
+
+        if (!stdout || stdout.trim().length === 0) {
+          return files;
+        }
+
+        // Handle both \r\n (Windows) and \n (Unix) line endings
+        const filePaths = stdout
+          .split(/\r?\n/)
+          .map(p => p.trim())
+          .filter(p => p.length > 0);
+
+        for (const filePath of filePaths) {
+          // Remove any BOM or special characters
+          const cleanPath = filePath.replace(/^\uFEFF/, '').trim();
+
+          if (fs.existsSync(cleanPath)) {
+            const stat = await fs.promises.stat(cleanPath);
+            if (stat.isFile()) {
+              files.push(cleanPath);
+            }
+          }
+        }
+      } catch (err) {
+        // Silently ignore clipboard detection errors
+      }
+    }
+  } catch (err) {
+    // Ignore errors
+  }
+
+  return files;
+}
+
+// Helper function to detect and save clipboard image with format detection
+async function detectAndSaveClipboardImage(
+  execAsync: (cmd: string) => Promise<{ stdout: string; stderr: string }>,
+  fs: typeof import("fs"),
+  os: typeof import("os")
+): Promise<{
+  hasImage: boolean;
+  tempPath?: string;
+  extension: string;
+  format: string;
+}> {
+  const timestamp = Date.now();
+
+  if (process.platform === "darwin") {
+    // macOS: Detect clipboard format first
+    try {
+      const { stdout } = await execAsync(`osascript -e 'clipboard info'`);
+
+      // Parse clipboard info to detect format
+      let format = "png";
+      let classType = "PNGf";
+
+      if (stdout.includes("JPEG")) {
+        format = "jpeg";
+        classType = "JPEGf";
+      } else if (stdout.includes("TIFF")) {
+        format = "tiff";
+        classType = "TIFFf";
+      } else if (stdout.includes("GIF")) {
+        format = "gif";
+        classType = "GIFf";
+      } else if (stdout.includes("BMP")) {
+        format = "bmp";
+        classType = "BMPf";
+      }
+
+      const tempPath = path.join(os.tmpdir(), `s3x-paste-${timestamp}.${format}`);
+
+      // Try to save with detected format
+      await execAsync(
+        `osascript -e 'set theImage to the clipboard as «class ${classType}»' ` +
+        `-e 'set theFile to open for access POSIX file "${tempPath}" with write permission' ` +
+        `-e 'write theImage to theFile' ` +
+        `-e 'close access theFile'`
+      );
+
+      const hasImage = fs.existsSync(tempPath) && (await fs.promises.stat(tempPath)).size > 0;
+
+      if (hasImage) {
+        return { hasImage: true, tempPath, extension: format, format: format.toUpperCase() };
+      }
+    } catch (err) {
+      // If format detection fails, try PNG as fallback
+      try {
+        const tempPath = path.join(os.tmpdir(), `s3x-paste-${timestamp}.png`);
+        await execAsync(
+          `osascript -e 'set theImage to the clipboard as «class PNGf»' ` +
+          `-e 'set theFile to open for access POSIX file "${tempPath}" with write permission' ` +
+          `-e 'write theImage to theFile' ` +
+          `-e 'close access theFile'`
+        );
+
+        const hasImage = fs.existsSync(tempPath) && (await fs.promises.stat(tempPath)).size > 0;
+        if (hasImage) {
+          return { hasImage: true, tempPath, extension: "png", format: "PNG" };
+        }
+      } catch (fallbackErr) {
+        // Ignore fallback errors
+      }
+    }
+  } else if (process.platform === "win32") {
+    // Windows: Try to detect and save image format
+    try {
+      // First, try to get the raw format information
+      const { stdout: formatInfo } = await execAsync(
+        `powershell -command "Add-Type -AssemblyName System.Windows.Forms; ` +
+        `$img = [System.Windows.Forms.Clipboard]::GetImage(); ` +
+        `if ($img) { $img.RawFormat.ToString() }"`
+      );
+
+      let format = "png";
+      let imageFormat = "Png";
+
+      const formatLower = formatInfo.trim().toLowerCase();
+      if (formatLower.includes("jpeg") || formatLower.includes("jpg")) {
+        format = "jpg";
+        imageFormat = "Jpeg";
+      } else if (formatLower.includes("gif")) {
+        format = "gif";
+        imageFormat = "Gif";
+      } else if (formatLower.includes("bmp")) {
+        format = "bmp";
+        imageFormat = "Bmp";
+      } else if (formatLower.includes("tiff") || formatLower.includes("tif")) {
+        format = "tiff";
+        imageFormat = "Tiff";
+      }
+
+      const tempPath = path.join(os.tmpdir(), `s3x-paste-${timestamp}.${format}`);
+
+      // Save with detected format
+      await execAsync(
+        `powershell -command "Add-Type -AssemblyName System.Windows.Forms; ` +
+        `$img = [System.Windows.Forms.Clipboard]::GetImage(); ` +
+        `if ($img) { $img.Save('${tempPath.replace(/\\/g, '\\\\')}', ` +
+        `[System.Drawing.Imaging.ImageFormat]::${imageFormat}) }"`
+      );
+
+      const hasImage = fs.existsSync(tempPath) && (await fs.promises.stat(tempPath)).size > 0;
+
+      if (hasImage) {
+        return { hasImage: true, tempPath, extension: format, format: format.toUpperCase() };
+      }
+    } catch (err) {
+      // If format detection fails, try PNG as fallback
+      try {
+        const tempPath = path.join(os.tmpdir(), `s3x-paste-${timestamp}.png`);
+        await execAsync(
+          `powershell -command "Add-Type -AssemblyName System.Windows.Forms; ` +
+          `$img = [System.Windows.Forms.Clipboard]::GetImage(); ` +
+          `if ($img) { $img.Save('${tempPath.replace(/\\/g, '\\\\')}', ` +
+          `[System.Drawing.Imaging.ImageFormat]::Png) }"`
+        );
+
+        const hasImage = fs.existsSync(tempPath) && (await fs.promises.stat(tempPath)).size > 0;
+        if (hasImage) {
+          return { hasImage: true, tempPath, extension: "png", format: "PNG" };
+        }
+      } catch (fallbackErr) {
+        // Ignore fallback errors
+      }
+    }
+  }
+
+  return { hasImage: false, extension: "png", format: "PNG" };
+}
+
+export async function activate(context: vscode.ExtensionContext) {
   // Initialize providers
   s3Explorer = new S3Explorer();
   s3FileSystemProvider = new S3FileSystemProvider();
@@ -110,8 +320,6 @@ export async function activate(context: vscode.ExtensionContext) {
       );
     }
   }
-
-  console.log("S3/R2 Explorer activated successfully");
 }
 
 export function deactivate() {
@@ -354,7 +562,6 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("s3x.refreshAll", async () => {
       // Force complete refresh - clear all caches and reload from scratch
-      console.log("Force refreshing all S3 data...");
       s3Cache.invalidateAll();
       clearClientCache();
       s3Explorer.refresh();
@@ -501,29 +708,56 @@ async function handlePasteUpload(node: any) {
     const { exec } = await import("child_process");
     const { promisify } = await import("util");
     const execAsync = promisify(exec);
+    const config = getConfig();
 
-    // Try to get image from clipboard
-    const tempImagePath = path.join(os.tmpdir(), `s3x-paste-${Date.now()}.png`);
-    let hasImage = false;
+    // Priority 1: Check for files in clipboard (supports any file format)
+    const clipboardFiles = await detectClipboardFiles(execAsync, fs);
 
-    try {
-      if (process.platform === "darwin") {
-        // macOS: use osascript to get clipboard image
-        await execAsync(`osascript -e 'set theImage to the clipboard as «class PNGf»' -e 'set theFile to open for access POSIX file "${tempImagePath}" with write permission' -e 'write theImage to theFile' -e 'close access theFile'`);
-        hasImage = fs.existsSync(tempImagePath) && (await fs.promises.stat(tempImagePath)).size > 0;
-      } else if (process.platform === "win32") {
-        // Windows: use PowerShell to get clipboard image
-        await execAsync(`powershell -command "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $img.Save('${tempImagePath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png) }"`);
-        hasImage = fs.existsSync(tempImagePath) && (await fs.promises.stat(tempImagePath)).size > 0;
+    if (clipboardFiles.length > 0) {
+      let uploadedCount = 0;
+      let failedCount = 0;
+
+      for (const filePath of clipboardFiles) {
+        try {
+          const originalFileName = path.basename(filePath);
+          const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
+          const objectKey = joinPath(prefix, fileName);
+
+          await withUploadProgress(async (progress) => {
+            progress.report({ message: `Uploading ${fileName}...` });
+            await uploadFile(bucket, objectKey, filePath, (progressPercent) => {
+              progress.setProgress(progressPercent, `Uploading ${fileName}... ${progressPercent}%`);
+            });
+          }, fileName);
+
+          uploadedCount++;
+        } catch (err) {
+          failedCount++;
+          showErrorMessage(`Failed to upload ${path.basename(filePath)}: ${err instanceof Error ? err.message : err}`);
+        }
       }
-    } catch (err) {
-      // Ignore errors, fall back to text handling
+
+      if (uploadedCount > 0) {
+        s3Cache.invalidate(bucket, prefix);
+        s3Explorer.refresh(node);
+
+        const message = failedCount > 0
+          ? `Uploaded ${uploadedCount} file${uploadedCount > 1 ? 's' : ''}, ${failedCount} failed`
+          : `Uploaded ${uploadedCount} file${uploadedCount > 1 ? 's' : ''} from clipboard successfully`;
+
+        showInformationMessage(message);
+      } else if (failedCount > 0) {
+        showErrorMessage(`Failed to upload all ${failedCount} file${failedCount > 1 ? 's' : ''}`);
+      }
+      return;
     }
 
-    if (hasImage) {
+    // Priority 2: Check for images in clipboard
+    const imageResult = await detectAndSaveClipboardImage(execAsync, fs, os);
+    if (imageResult.hasImage && imageResult.tempPath) {
+      const imageTempPath = imageResult.tempPath; // Extract to local variable for type safety
       try {
-        const config = getConfig();
-        const template = config.pasteImageFileNameTemplate || "image-${dateTime}.png";
+        const template = config.pasteFileNameTemplate || "image-${dateTime}.${ext}";
 
         const now = new Date();
         const date = now.toISOString().split('T')[0];
@@ -533,61 +767,61 @@ async function handlePasteUpload(node: any) {
         const fileName = template
           .replace(/\$\{date\}/g, date)
           .replace(/\$\{dateTime\}/g, dateTime)
-          .replace(/\$\{timestamp\}/g, timestamp);
+          .replace(/\$\{timestamp\}/g, timestamp)
+          .replace(/\$\{ext\}/g, imageResult.extension);
 
         const objectKey = joinPath(prefix, fileName);
 
         await withUploadProgress(async (progress) => {
           progress.report({ message: `Uploading ${fileName}...` });
-          await uploadFile(bucket, objectKey, tempImagePath, (progressPercent) => {
+          await uploadFile(bucket, objectKey, imageTempPath, (progressPercent) => {
             progress.setProgress(progressPercent, `Uploading ${fileName}... ${progressPercent}%`);
           });
         }, fileName);
 
         s3Cache.invalidate(bucket, prefix);
         s3Explorer.refresh(node);
-        showInformationMessage(`Uploaded "${fileName}" from clipboard successfully`);
+        showInformationMessage(`Uploaded "${fileName}" (${imageResult.format}) from clipboard successfully`);
       } finally {
-        await fs.promises.unlink(tempImagePath).catch(() => {});
+        await fs.promises.unlink(imageTempPath).catch(() => {});
       }
       return;
     }
 
-    // No image, try text
+    // Priority 3: Check for text content (file path or plain text)
     const clipboardText = await vscode.env.clipboard.readText();
     if (!clipboardText) {
-      showErrorMessage("Clipboard is empty");
+      showErrorMessage("Clipboard is empty or contains unsupported content");
       return;
     }
 
     // Check if clipboard contains a file path
-    if (fs.existsSync(clipboardText.trim())) {
-      const filePath = clipboardText.trim();
-      const stat = await fs.promises.stat(filePath);
+    const trimmedText = clipboardText.trim();
+    if (fs.existsSync(trimmedText)) {
+      const stat = await fs.promises.stat(trimmedText);
 
       if (stat.isFile()) {
-        const originalFileName = path.basename(filePath);
-        const config = getConfig();
+        const originalFileName = path.basename(trimmedText);
         const fileName = applyFileNameTemplate(originalFileName, config.uploadFileNameTemplate);
         const objectKey = joinPath(prefix, fileName);
 
         await withUploadProgress(async (progress) => {
           progress.report({ message: `Uploading ${fileName}...` });
-          await uploadFile(bucket, objectKey, filePath, (progressPercent) => {
+          await uploadFile(bucket, objectKey, trimmedText, (progressPercent) => {
             progress.setProgress(progressPercent, `Uploading ${fileName}... ${progressPercent}%`);
           });
         }, fileName);
 
         s3Cache.invalidate(bucket, prefix);
         s3Explorer.refresh(node);
-        showInformationMessage(`Uploaded "${fileName}" from clipboard successfully`);
+        showInformationMessage(`Uploaded "${fileName}" from clipboard path successfully`);
         return;
       }
     }
 
-    // Clipboard contains text content - create temporary file
+    // Priority 4: Treat as plain text content
     const fileName = await vscode.window.showInputBox({
-      prompt: "Enter filename for clipboard content",
+      prompt: "Enter filename for clipboard text content",
       value: `clipboard-${Date.now()}.txt`,
     });
 
@@ -599,7 +833,6 @@ async function handlePasteUpload(node: any) {
     await fs.promises.writeFile(tempFilePath, clipboardText, "utf-8");
 
     try {
-      const config = getConfig();
       const finalFileName = applyFileNameTemplate(fileName, config.uploadFileNameTemplate);
       const objectKey = joinPath(prefix, finalFileName);
 
@@ -612,7 +845,7 @@ async function handlePasteUpload(node: any) {
 
       s3Cache.invalidate(bucket, prefix);
       s3Explorer.refresh(node);
-      showInformationMessage(`Uploaded "${finalFileName}" from clipboard successfully`);
+      showInformationMessage(`Uploaded "${finalFileName}" from clipboard text successfully`);
     } finally {
       await fs.promises.unlink(tempFilePath).catch(() => {});
     }
@@ -1353,7 +1586,7 @@ async function handleRenameFolder(node: any) {
   }
 
   // Calculate new prefix by replacing the folder name part
-  const prefixParts = oldPrefix.split("/").filter(p => p);
+  const prefixParts = oldPrefix.split("/").filter((p: string) => p);
   prefixParts[prefixParts.length - 1] = newFolderName;
   const newPrefix = prefixParts.join("/") + "/";
 

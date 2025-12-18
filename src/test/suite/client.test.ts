@@ -44,7 +44,10 @@ suite("S3 Client Tests", () => {
       accessKeyId: "test-access-key",
       secretAccessKey: "test-secret-key", 
       forcePathStyle: true,
-      maxPreviewSizeBytes: 10485760
+      maxPreviewSizeBytes: 10485760,
+      includeBucketInPublicUrl: true,
+      uploadFileNameTemplate: "${fileName}${extName}",
+      pasteFileNameTemplate: "paste-${dateTime}.${ext}"
     };
     const validErrors = validateConfig(validConfig);
     assert.strictEqual(validErrors.length, 0);

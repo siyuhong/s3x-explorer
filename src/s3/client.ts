@@ -18,6 +18,7 @@ export function getConfig(): S3Config {
     customDomain: config.get<string>("customDomain", ""),
     includeBucketInPublicUrl: config.get<boolean>("includeBucketInPublicUrl", true),
     uploadFileNameTemplate: config.get<string>("uploadFileNameTemplate", "${fileName}${extName}"),
+    pasteFileNameTemplate: config.get<string>("pasteFileNameTemplate", "paste-${dateTime}.${ext}"),
   };
 }
 
